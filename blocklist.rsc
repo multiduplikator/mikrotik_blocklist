@@ -1,3 +1,4 @@
+/ip firewall address-list
 add list=blocklist address=1.1.154.230
 add list=blocklist address=1.2.132.190
 add list=blocklist address=1.4.170.223
