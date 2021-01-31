@@ -41,6 +41,6 @@ grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-
 cat *.out | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 
 # Transform to mikrotik rsc
-cat blocklist.txt | awk '{print "add list=blocklist address="$0}' > blocklist.rsc
+cat blocklist.txt | awk '{print "add list=blocklist address=\""$0"\""}' > blocklist.rsc
 
 sed -i '1 i\\/ip firewall address-list' blocklist.rsc
