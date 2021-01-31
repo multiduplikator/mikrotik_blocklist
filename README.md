@@ -23,13 +23,9 @@ grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-
 wget -O feodo.in https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' feodo.in | awk '!/\//{$0=$0"/32"}{print}' > feodo.out
 
-# Merge all (prefixed) list entries, aggregate and strip /32 prefix
-# using https://github.com/tycho/aggregate-prefixes
+# Merge all (prefixed) list entries, aggregate and strip /32 prefix using https://github.com/tycho/aggregate-prefixes
 cat *.out | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 
 # Transform to mikrotik rsc
 cat blocklist.txt | awk '{print "add list=blocklist address="$0" comment=blocklist"}' > blocklist.rsc
 sed -i '1 i\\/ip firewall address-list' blocklist.rsc
-
-
-
