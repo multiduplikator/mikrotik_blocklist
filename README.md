@@ -2,7 +2,7 @@
 In an attempt to make the list as compact as possible, we are trying to to use prefix aggregation on a merged set of source lists.
 This should increase the performance on the router while minimizing ressource usage at the same time.
 
-Currently, this list updates every 3h - currently working out what a good frequency would be.
+Currently, this list updates every 3h - while working out what a good frequency would be.
 
 ### Aggregated blocklist for mikrotik (and others)
 
