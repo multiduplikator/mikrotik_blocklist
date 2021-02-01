@@ -34,7 +34,7 @@ Now, we merge all (prefixed) list entries, aggregate (using https://github.com/t
 cat *.out | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 ```
 
-Finally, we generate mikrotik rsc version of the raw blocklist for easy importing
+Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
 
 ```
 cat blocklist.txt | awk '{print "add list=blocklist address=\""$0"\" comment=\"blocklist\""}' > blocklist.rsc
