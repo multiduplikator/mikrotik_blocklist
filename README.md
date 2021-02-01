@@ -4,7 +4,7 @@
 First, we grab the lists and extract IP/CIDR information from them
 
 ```
-wget -O dshield.in https://www.dshield.org/block.txt
+wget -O dshield.in https://feeds.dshield.org/block.txt
 grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 
 wget -O spamhaus_drop.in https://www.spamhaus.org/drop/drop.txt
