@@ -1,4 +1,9 @@
 # mikrotik_blocklist
+In an attempt to make the list as compact as possible, we are trying to to use prefix aggregation on a merged set of source lists.
+This should increase the performance on the router while minimizing ressource usage at the same time.
+
+Currently, this list updates every 3h - currently working out what a good frequency would be.
+
 ### Aggregated blocklist for mikrotik (and others)
 
 First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
@@ -47,3 +52,6 @@ For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/RO
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
 /ip firewall address-list remove [find where list="blocklist"]; /import file-name=blocklist.rsc
 ```
+
+Clearly, this mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
+Maybe, an approach with a temporary list or even two toggled lists would be better. Suggestions are welcome...
