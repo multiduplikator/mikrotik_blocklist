@@ -1,7 +1,7 @@
 # mikrotik_blocklist
 ### Aggregated blocklist for mikrotik (and others)
 
-First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggretation later)
+First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
 
 ```
 wget -O dshield.in https://feeds.dshield.org/block.txt
