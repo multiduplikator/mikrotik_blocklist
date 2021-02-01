@@ -44,5 +44,5 @@ sed -i '1 i\\/ip firewall address-list' blocklist.rsc
 ### Strawman for downloading and updating on the mikrotik (firewall rule not included!)
 ```
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
-/ip firewall address-list remove [find where list="blocklist"]; /import file-name=blacklist.rsc
+/ip firewall address-list remove [find where list="blocklist"]; /import file-name=blocklist.rsc
 ```
