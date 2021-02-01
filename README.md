@@ -10,7 +10,7 @@ First, we grab the lists and extract IP/CIDR information from them (adding /32 w
 
 ```
 wget -O dshield.in https://feeds.dshield.org/block.txt
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 
 wget -O spamhaus_drop.in https://www.spamhaus.org/drop/drop.txt
 grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_drop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_drop.out
@@ -42,7 +42,7 @@ Before aggregation, we make sure to remove 0.0.0.0*, 192.168.0.0* and 224.0.0.0*
 These three IP sets should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall 
 
 ```
-cat *.out | sed '/^0\.0\.0\.0\|^192\.168\.0\.0\|^224\.0\.0\.0/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt ; (($? != 0)) && error=1
+cat *.out | sed '/^0\.0\.0\.0\|^192\.168\.0\.0\|^224\.0\.0\.0/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 ```
 
 Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
