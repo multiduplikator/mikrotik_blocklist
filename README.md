@@ -40,3 +40,9 @@ Finally, we generate mikrotik rsc version of the raw blocklist for easy importin
 cat blocklist.txt | awk '{print "add list=blocklist address=\""$0"\" comment=\"blocklist\""}' > blocklist.rsc
 sed -i '1 i\\/ip firewall address-list' blocklist.rsc
 ```
+
+### Strawman for downloading and updating on the mikrotik (firewall rule not included!)
+```
+/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
+/ip firewall address-list remove [find where list="blocklist"]; /import file-name=blacklist.rsc
+```
