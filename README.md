@@ -38,7 +38,7 @@ grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-
 ```
 
 Now, we merge all list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give us the raw blocklist .
-Before aggregation, we make sure to remove 0.0.0.0*, 192.168.0.0* and 224.0.0.0* from the lists to make sure we don't lock ourselves out accidentally on update.
+Before aggregation, we remove 0.0.0.0*, 192.168.0.0* and 224.0.0.0* from the lists to make sure we don't lock ourselves out accidentally on update.
 These three IP sets should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall 
 
 ```
