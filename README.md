@@ -26,7 +26,7 @@ wget -O feodo.in https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' feodo.in | awk '!/\//{$0=$0"/32"}{print}' > feodo.out
 ```
 
-Now, we merge all (prefixed) list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give use the raw blocklist 
+Now, we merge all (prefixed) list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give us the raw blocklist 
 
 ```
 cat *.out | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
