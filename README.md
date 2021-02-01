@@ -40,7 +40,7 @@ sed -i '1 i\\/ip firewall address-list' blocklist.rsc
 ```
 
 ### Strawman for downloading and updating on the mikrotik (firewall rule not included!)
-You might want to consider using this in the raw table. Also be aware that multicast (i.e. 224.0.0.0/4) is intentionally not blocked to allow for IPTV to work.
+You might want to consider using this in the raw table. Also be aware that multicast (i.e. 224.0.0.0/4) should not blocked to allow for IPTV to work.
 For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall to get going...
 
 ```
