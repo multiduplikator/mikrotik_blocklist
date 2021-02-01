@@ -9,32 +9,40 @@ Currently, this list updates every 3h - while working out what a good frequency 
 First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
 
 ```
-wget -O dshield.in https://feeds.dshield.org/block.txt
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
+wget -O dshield.in https://feeds.dshield.org/block.txt ; (($? != 0)) && error=1
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out ; (($? != 0)) && error=1
 
-wget -O spamhaus_drop.in https://www.spamhaus.org/drop/drop.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_drop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_drop.out
+wget -O spamhaus_drop.in https://www.spamhaus.org/drop/drop.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_drop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_drop.out ; (($? != 0)) && error=1
 
-wget -O spamhaus_edrop.in https://www.spamhaus.org/drop/edrop.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_edrop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_edrop.out
+wget -O spamhaus_edrop.in https://www.spamhaus.org/drop/edrop.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_edrop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_edrop.out ; (($? != 0)) && error=1
 
-wget -O abuse.in https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' abuse.in | awk '!/\//{$0=$0"/32"}{print}' > abuse.out
+wget -O abuse.in https://sslbl.abuse.ch/blacklist/sslipblacklist.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' abuse.in | awk '!/\//{$0=$0"/32"}{print}' > abuse.out ; (($? != 0)) && error=1
 
-wget -O malc0de.in https://malc0de.com/bl/IP_Blacklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' malc0de.in | awk '!/\//{$0=$0"/32"}{print}' > malc0de.out
+wget -O malc0de.in https://malc0de.com/bl/IP_Blacklist.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' malc0de.in | awk '!/\//{$0=$0"/32"}{print}' > malc0de.out ; (($? != 0)) && error=1
 
-wget -O blocklist_de.in https://lists.blocklist.de/lists/all.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' blocklist_de.in | awk '!/\//{$0=$0"/32"}{print}' > blocklist_de.out
+wget -O blocklist_de.in https://lists.blocklist.de/lists/all.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' blocklist_de.in | awk '!/\//{$0=$0"/32"}{print}' > blocklist_de.out ; (($? != 0)) && error=1
 
-wget -O feodo.in https://feodotracker.abuse.ch/downloads/ipblocklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' feodo.in | awk '!/\//{$0=$0"/32"}{print}' > feodo.out
+wget -O feodo.in https://feodotracker.abuse.ch/downloads/ipblocklist.txt ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' feodo.in | awk '!/\//{$0=$0"/32"}{print}' > feodo.out ; (($? != 0)) && error=1
+
+wget -O firehol_l1.in https://iplists.firehol.org/files/firehol_level1.netset ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' firehol_l1.in | awk '!/\//{$0=$0"/32"}{print}' > firehol_l1.out ; (($? != 0)) && error=1
+
+wget -O firehol_l2.in https://iplists.firehol.org/files/firehol_level2.netset ; (($? != 0)) && error=1
+grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' firehol_l2.in | awk '!/\//{$0=$0"/32"}{print}' > firehol_l2.out ; (($? != 0)) && error=1
 ```
 
-Now, we merge all list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give us the raw blocklist 
+Now, we merge all list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give us the raw blocklist .
+Before aggregation, we make sure to remove 0.0.0.0*, 192.168.0.0* and 224.0.0.0* from the lists to make sure we don't lock ourselves out accidentally on update.
+These three IP sets should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall 
 
 ```
-cat *.out | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
+cat *.out | sed '/^0\.0\.0\.0\|^192\.168\.0\.0\|^224\.0\.0\.0/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt ; (($? != 0)) && error=1
 ```
 
 Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
