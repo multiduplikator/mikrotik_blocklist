@@ -4,6 +4,8 @@ This should increase the performance on the router while minimizing ressource us
 
 Currently, this list updates every 3h - while working out what a good frequency would be.
 
+The following is ment as a reference for the blocklist sources, regex and basic mechanics - by no means should you cut, paste and run this in a production environement ... unless you add some proper error handling. 
+
 ### Aggregated blocklist for mikrotik (and others)
 
 First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
