@@ -74,11 +74,11 @@ THIS IS EXTREMELY SLOW! DON'T RUN THIS!
 /import file-name=blocklist.rsc
 
 # check if blocklist exists with entries
-:if ([:len [/ip firewall address-list find list=blocklist]] > 0 ) do={
+:if ([:len [/ip firewall address-list find list=new_blocklist]] > 0 ) do={
 	# remove nonexisting in blocklist from prod_blocklist, and existing in both from blocklist
 	:foreach i in=[/ip firewall address-list find list=prod_blocklist] do={
 		:local oldaddress [/ip firewall address-list get $i address]
-		:local existnew [/ip firewall address-list find where list=blocklist and address=$oldaddress]
+		:local existnew [/ip firewall address-list find where list=new_blocklist and address=$oldaddress]
 	  
 		:if ([:len $existnew] > 0) do={
 			/ip firewall address-list remove $existnew
@@ -87,7 +87,7 @@ THIS IS EXTREMELY SLOW! DON'T RUN THIS!
 		}
 	}
 	# add remaining new blocklist entries to prod_blocklist
-	:foreach j in=[/ip firewall address-list find list=blocklist] do={
+	:foreach j in=[/ip firewall address-list find list=new_blocklist] do={
 		:local newaddress [/ip firewall address-list get $j address]
 		/ip firewall address-list add list=prod_blocklist address=$newaddress
 		/ip firewall address-list remove $j
