@@ -54,9 +54,9 @@ cat blocklist.txt | awk '{print "add list=new_blocklist address=\""$0"\" comment
 sed -i '1 i\\/ip firewall address-list' blocklist.rsc
 ```
 
-### Strawman for downloading and updating on the mikrotik (firewall rule not included!)
-You might want to consider using this in the raw table. Also be aware that multicast (i.e. 224.0.0.0/4) should not be blocked to allow for IPTV to work.
-For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall to get going...
+### Downloading and updating on the mikrotik
+You might want to consider using this blocklist in the ip firewall raw table. Also be aware that multicast (i.e. 224.0.0.0/4) should not be blocked to allow for IPTV to work.
+For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall to get going...and make sure you add the actual firewall rules to make use of the blocklist.
 
 ```
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
