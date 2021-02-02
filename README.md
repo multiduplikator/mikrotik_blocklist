@@ -11,40 +11,26 @@ The following is ment as a reference for the blocklist sources, regex and basic 
 First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
 
 ```
+wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
+wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
+wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
+wget -O malc0de.out https://malc0de.com/bl/IP_Blacklist.txt
+wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
+wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
+wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
+
+# dshield entires are in /24 
 wget -O dshield.in https://feeds.dshield.org/block.txt
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
-
-wget -O spamhaus_drop.in https://www.spamhaus.org/drop/drop.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_drop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_drop.out
-
-wget -O spamhaus_edrop.in https://www.spamhaus.org/drop/edrop.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' spamhaus_edrop.in | awk '!/\//{$0=$0"/32"}{print}' > spamhaus_edrop.out
-
-wget -O sslbl.in https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' sslbl.in | awk '!/\//{$0=$0"/32"}{print}' > sslbl.out
-
-wget -O malc0de.in https://malc0de.com/bl/IP_Blacklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' malc0de.in | awk '!/\//{$0=$0"/32"}{print}' > malc0de.out
-
-wget -O blocklist_de.in https://lists.blocklist.de/lists/all.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' blocklist_de.in | awk '!/\//{$0=$0"/32"}{print}' > blocklist_de.out
-
-wget -O feodo.in https://feodotracker.abuse.ch/downloads/ipblocklist.txt
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' feodo.in | awk '!/\//{$0=$0"/32"}{print}' > feodo.out
-
-wget -O firehol_l1.in https://iplists.firehol.org/files/firehol_level1.netset
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' firehol_l1.in | awk '!/\//{$0=$0"/32"}{print}' > firehol_l1.out
-
-wget -O firehol_l2.in https://iplists.firehol.org/files/firehol_level2.netset
-grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' firehol_l2.in | awk '!/\//{$0=$0"/32"}{print}' > firehol_l2.out
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
 ```
 
-Now, we merge all list entries, aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 CIDR, which will give us the raw blocklist .
-Before aggregation, we remove 0.0.0.0*, 192.168.0.0* and 224.0.0.0* (esp. your networks!) from the lists to make sure we don't lock ourselves out accidentally on update.
-These three IP sets should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall 
+Now, we merge all list entries, and extraxt IP/CIDR information and add missing /32 where needed (for aggregate-prefix to work).
+Then we remove 0.0.0.0/8, 192.168.0.0/16 and 224.0.0.0/4 since these should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall
+Next, we aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 again (save some bits), which will give us the raw blocklist .
 
 ```
-cat *.out | sed '/^0\.0\.0\.0\|^192\.168\.0\.0\|^224\.0\.0\.0/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
+cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|0)/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt ; (($? != 0)) && error=1
 ```
 
 Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
