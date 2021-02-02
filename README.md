@@ -67,7 +67,7 @@ Clearly, this mechanism leads to a short window of time, where blocking deterior
 However, its performance in terms of loading time is acceptable.
 
 A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). So after the fetching part, we would do something like the following.
-**THIS IS EXTREMELY SLOW! DON'T RUN THIS!**
+**THE FOLLOWING IS EXTREMELY SLOW! DON'T RUN THIS!**
 
 ```
 # load blocklist
@@ -95,7 +95,7 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 } 
 ```
 
-Well, the let us try this with arrays - again taking it away from right after the fetching part. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we know it worked if new_blocklist has 0 (zero) entries on exit. **THIS WORKS MUCH(!!!) FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**. About 2min for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorete during this process, works for me...
+Well, the let us try this with arrays - again taking it away from right after the fetching part. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we know it worked if new_blocklist has 0 (zero) entries on exit. **THE FOLLOWING WORKS MUCH(!!!) FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**. About 2min for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorete during this process, works for me...
 
 ```
 # load blocklist
