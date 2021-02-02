@@ -63,8 +63,8 @@ For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/RO
 /ip firewall address-list remove [find where list="blocklist"]; /import file-name=blocklist.rsc
 ```
 
-Clearly, this mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
-However, its performance in terms of loading time is acceptable.
+Clearly, the above mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
+However, its performance in terms of loading time is quite good.
 
 A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). So after the fetching part, we would do something like the following.
 **THE FOLLOWING IS EXTREMELY SLOW! DON'T RUN THIS!**
