@@ -95,7 +95,7 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 } 
 ```
 
-Well, the let us try this with arrays - again taking it away from right after the fetching part.
+Well, the let us try this with arrays - again taking it away from right after the fetching part. The following script works **MUCH FASTER, ACTUALLY DECENT PERFORMANCE**.
 
 ```
 # load blocklist
@@ -128,7 +128,8 @@ Well, the let us try this with arrays - again taking it away from right after th
 			remove $value
 		}
 	}
-	# the newkeys and newips arrays now contain only the remaining entries to be added to prod_blocklist and removed from new_blocklist
+	# the newkeys and newips arrays now contain only the remaining entries
+	# to be added to prod_blocklist and removed from new_blocklist
 	:for i from=0 to=[:len $newkeys] do={
 		:if ([:len ($newkeys->($i))] > 0) do={
 			add list=prod_blocklist address=($newips->($i))
