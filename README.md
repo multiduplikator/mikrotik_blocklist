@@ -66,8 +66,8 @@ For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/RO
 Clearly, this mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
 However, its performance in terms of loading time is acceptable.
 
-A better approach would be to work with two lists (e.g. prod_blocklist and blocklist). So after the fetching part, we would do something like the following.
-THIS IS EXTREMELY SLOW! DON'T RUN THIS!
+A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). So after the fetching part, we would do something like the following.
+**THIS IS EXTREMELY SLOW! DON'T RUN THIS!**
 
 ```
 # load blocklist
@@ -75,7 +75,7 @@ THIS IS EXTREMELY SLOW! DON'T RUN THIS!
 
 # check if blocklist exists with entries
 :if ([:len [/ip firewall address-list find list=new_blocklist]] > 0 ) do={
-	# remove nonexisting in blocklist from prod_blocklist, and existing in both from blocklist
+	# remove nonexisting in new_blocklist from prod_blocklist, and existing in both from new_blocklist
 	:foreach i in=[/ip firewall address-list find list=prod_blocklist] do={
 		:local oldaddress [/ip firewall address-list get $i address]
 		:local existnew [/ip firewall address-list find where list=new_blocklist and address=$oldaddress]
@@ -94,3 +94,45 @@ THIS IS EXTREMELY SLOW! DON'T RUN THIS!
 	}
 } 
 ```
+
+Well, the let us try this with arrays - again taking it away from right after the fetching part.
+
+```
+# load blocklist
+/import file-name=blocklist.rsc
+
+# enter the address-list section
+/ip firewall address-list
+
+# load blocklists into array
+:local prdkeys [find list=prod_blocklist]
+:local newkeys [find list=new_blocklist]
+
+# translate newkeys to newips
+:local newips [:toarray ""]
+:foreach value in=$newkeys do={:set newips (newips,[get $value address])}
+
+# check that we actually have new_blocklist entries
+:if ([:len $newkeys] > 0 ) do={
+	# remove exisiting in both from new_blocklist, and nonexisting in new_blocklist from prod_blocklist
+	:foreach value in=$prdkeys do={
+		:local keyindex [:find $newips [get $value address]]
+		:if ($keyindex > 0) do={
+			# removal from new_blocklist
+			remove ($newkeys->($keyindex))
+			# erasing array entries to speedup next search and prepare for next stage
+			:set ($newkeys->($keyindex)) ""
+			:set ($newips->($keyindex)) ""
+		} else={
+			# removal from prod_blocklist
+			remove $value
+		}
+	}
+	# the newkeys and newips arrays now contain only the remaining entries to be added to prod_blocklist and removed from new_blocklist
+	:for i from=0 to=[:len $newkeys] do={
+		:if ([:len ($newkeys->($i))] > 0) do={
+			add list=prod_blocklist address=($newips->($i))
+			remove ($newkeys->($i))
+		}
+	}
+}
