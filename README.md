@@ -64,4 +64,33 @@ For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/RO
 ```
 
 Clearly, this mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
-Maybe, an approach with a temporary list or even two toggled lists would be better. Suggestions are welcome...
+However, its performance in terms of loading time is acceptable.
+
+A better approach would be to work with two lists (e.g. prod_blocklist and blocklist). So after the fetching part, we would do something like the following.
+THIS IS EXTREMELY SLOW! DON'T RUN THIS!
+
+```
+# load blocklist
+/import file-name=blocklist.rsc
+
+# check if blocklist exists with entries
+:if ([:len [/ip firewall address-list find list=blocklist]] > 0 ) do={
+	# remove nonexisting in blocklist from prod_blocklist, and existing in both from blocklist
+	:foreach i in=[/ip firewall address-list find list=prod_blocklist] do={
+		:local oldaddress [/ip firewall address-list get $i address]
+		:local existnew [/ip firewall address-list find where list=blocklist and address=$oldaddress]
+	  
+		:if ([:len $existnew] > 0) do={
+			/ip firewall address-list remove $existnew
+		} else={
+			/ip firewall address-list remove $i
+		}
+	}
+	# add remaining new blocklist entries to prod_blocklist
+	:foreach j in=[/ip firewall address-list find list=blocklist] do={
+		:local newaddress [/ip firewall address-list get $j address]
+		/ip firewall address-list add list=prod_blocklist address=$newaddress
+		/ip firewall address-list remove $j
+	}
+} 
+```
