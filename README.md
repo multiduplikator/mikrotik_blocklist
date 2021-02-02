@@ -108,12 +108,11 @@ Well, the let us try this with arrays - again taking it away from right after th
 :local prdkeys [find list=prod_blocklist]
 :local newkeys [find list=new_blocklist]
 
-# translate newkeys to newips
-:local newips [:toarray ""]
-:foreach value in=$newkeys do={:set newips (newips,[get $value address])}
-
 # check that we actually have new_blocklist entries
 :if ([:len $newkeys] > 0 ) do={
+	# translate newkeys to newips
+	:local newips [:toarray ""]
+	:foreach value in=$newkeys do={:set newips (newips,[get $value address])}
 	# remove exisiting in both from new_blocklist, and nonexisting in new_blocklist from prod_blocklist
 	:foreach value in=$prdkeys do={
 		:local keyindex [:find $newips [get $value address]]
