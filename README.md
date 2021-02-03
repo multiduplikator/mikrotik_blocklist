@@ -35,7 +35,7 @@ Next, we aggregate (using https://github.com/tycho/aggregate-prefixes) and strip
 cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|0\.)/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 ```
 
-Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
+Finally, we generate mikrotik rsc versions of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise). One for address-list based approach, and one for global array approach.
 
 ```
 # address-list approach
