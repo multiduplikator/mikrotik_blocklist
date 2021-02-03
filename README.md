@@ -149,7 +149,7 @@ What if we did not import new_blocklist into an address-list but instead into a 
 :local prdkeys [find list=prod_blocklist]
 # load blocklist into global array newips
 /import file-name=blocklist_ga.rsc
-# load new blocklist (via global from /import above)  
+# load newips arrawy (created with /import above)  
 :global newips
 
 /ip firewall address-list
