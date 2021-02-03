@@ -76,7 +76,6 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 	:foreach i in=[/ip firewall address-list find list=prod_blocklist] do={
 		:local oldaddress [/ip firewall address-list get $i address]
 		:local existnew [/ip firewall address-list find where list=new_blocklist and address=$oldaddress]
-	  
 		:if ([:len $existnew] > 0) do={
 			/ip firewall address-list remove $existnew
 		} else={
