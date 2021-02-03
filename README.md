@@ -139,7 +139,7 @@ What if we did not import new_blocklist into an address-list but instead into a 
 **THIS IS BY FAR THE FASTEST, YET**
 
 ```
-# fetch the blocklist to file
+# fetch the blocklist (array version) to file
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
 
 # load blocklist into global array newips
