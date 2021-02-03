@@ -89,7 +89,7 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 
 Well, then let us try this with arrays. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we have indication that it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. This takes about 2min for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
 
-**THE FOLLOWING WORKS MUCH(!!!) FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**
+**THE FOLLOWING WORKS MUCH FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**
 
 ```
 # fetch the blocklist to file
@@ -133,3 +133,48 @@ Well, then let us try this with arrays. Adding in a few more comments to make it
 		}
 	}
 }
+```
+What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 1min for some 26k entries to process. Here we go ...
+
+**THIS IS BY FAR THE FASTEST, YET**
+
+```
+# fetch the blocklist to file
+/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
+
+# load blocklist into global array newips
+/import file-name=blocklist_ga.rsc
+
+# enter the address-list section
+/ip firewall address-list
+
+# load production blocklist into array
+:local prdkeys [find list=prod_blocklist]
+
+# load new blocklist (via global from import above)  
+:global newips
+
+# check that we actually have entries in newips
+:if ([:len $newips] > 0 ) do={
+	# remove exisiting in both from newips, and nonexisting in newips from prod_blocklist
+	:foreach value in=$prdkeys do={
+		:local keyindex [:find $newips [get $value address]]
+		:if ($keyindex > 0) do={
+			# erasing array entries to speedup next search and prepare follwing stage
+			:set ($newips->($keyindex)) ""
+		} else={
+			# removal from prod_blocklist
+			remove $value
+		}
+	}
+	# the newips arrays now contain only the remaining entries to be added to prod_blocklist
+	:for i from=0 to=[:len $newips] do={
+		:if ([:len ($newips->($i))] > 0) do={
+			add list=prod_blocklist address=($newips->($i))
+		}
+	}
+}
+
+# unset global newips array
+:global newips [:toarray ""]
+```
