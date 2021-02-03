@@ -151,7 +151,7 @@ What if we did not import new_blocklist into an address-list but instead into a 
 # load production blocklist into array
 :local prdkeys [find list=prod_blocklist]
 
-# load new blocklist (via global from import above)  
+# load new blocklist (via global from /import above)  
 :global newips
 
 # check that we actually have entries in newips
