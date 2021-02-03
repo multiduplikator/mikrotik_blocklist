@@ -1,6 +1,6 @@
 # mikrotik blocklist (aka blacklist)
-In an attempt to make the list as compact as possible, we are trying to to use prefix aggregation on a merged set of source lists.
-This should increase the performance on the router while minimizing ressource usage at the same time.
+In an attempt to make the solution compact as possible, we are trying to use prefix aggregation on a merged set of source lists.
+This should increase the performance on the router while minimizing ressource usage and maintenance time.
 
 Currently, this list updates every 6h - while working out what a good frequency would be.
 
