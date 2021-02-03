@@ -139,17 +139,16 @@ Well, then let us try this with arrays. Adding in a few more comments to make it
 	}
 }
 ```
-What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 70-90sec for some 26k entries to process. Here we go ...
+What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 70-90sec for some 26k entries to process. Here we go, commenting only the key changes in mechanics ...
 
 **THIS IS BY FAR THE FASTEST, YET**
 
 ```
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
 
+:local prdkeys [find list=prod_blocklist]
 # load blocklist into global array newips
 /import file-name=blocklist_ga.rsc
-
-:local prdkeys [find list=prod_blocklist]
 # load new blocklist (via global from /import above)  
 :global newips
 
