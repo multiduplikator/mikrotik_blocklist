@@ -139,7 +139,7 @@ Well, then let us try this with arrays. Adding in a few more comments to make it
 	}
 }
 ```
-What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 1min for some 26k entries to process. Here we go ...
+What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 60-90sec for some 26k entries to process. Here we go ...
 
 **THIS IS BY FAR THE FASTEST, YET**
 
