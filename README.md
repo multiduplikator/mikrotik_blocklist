@@ -38,8 +38,13 @@ cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0
 Finally, we generate mikrotik rsc version of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise)
 
 ```
+# address-list approach
 cat blocklist.txt | awk '{print "add list=new_blocklist address=\""$0"\" comment=\"blocklist\""}' > blocklist.rsc
 sed -i '1 i\\/ip firewall address-list' blocklist.rsc
+
+# array approach
+cat blocklist.txt | awk '{print ":set newips (newips,\""$0"\")"}' > blocklist_ga.rsc
+sed -i '1 i\\:global newips \[\:toarray \"\"\]' blocklist_ga.rsc
 ```
 
 ### Downloading and updating on the mikrotik
