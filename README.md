@@ -54,10 +54,13 @@ For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/RO
 Clearly, the above mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
 However, its performance in terms of loading time is quite good.
 
-A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). So after the fetching part, we would do something like the following.
+A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). With basic scripting we would do something like the following.
 **THE FOLLOWING IS EXTREMELY SLOW! DON'T RUN THIS!**
 
 ```
+# fetch the blocklist to file
+/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
+
 # load blocklist
 /import file-name=blocklist.rsc
 
@@ -83,9 +86,13 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 } 
 ```
 
-Well, the let us try this with arrays - again taking it away from right after the fetching part. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we know it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. **THE FOLLOWING WORKS MUCH(!!!) FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**. About 2min for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
+Well, the let us try this with arrays. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we have indication that it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. This takes about 2min for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
+**THE FOLLOWING WORKS MUCH(!!!) FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**
 
 ```
+# fetch the blocklist to file
+/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
+
 # load blocklist
 /import file-name=blocklist.rsc
 
