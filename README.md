@@ -144,35 +144,26 @@ What if we did not import new_blocklist into an address-list but instead into a 
 **THIS IS BY FAR THE FASTEST, YET**
 
 ```
-# fetch the blocklist (array version) to file
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
 
 # load blocklist into global array newips
 /import file-name=blocklist_ga.rsc
 
-# enter the address-list section
-/ip firewall address-list
-
-# load production blocklist into array
 :local prdkeys [find list=prod_blocklist]
-
 # load new blocklist (via global from /import above)  
 :global newips
 
-# check that we actually have entries in newips
+/ip firewall address-list
+
 :if ([:len $newips] > 0 ) do={
-	# remove exisiting in both from newips, and nonexisting in newips from prod_blocklist
 	:foreach value in=$prdkeys do={
 		:local keyindex [:find $newips [get $value address]]
 		:if ($keyindex > 0) do={
-			# erasing array entries to speedup next search and prepare follwing stage
 			:set ($newips->($keyindex)) ""
 		} else={
-			# removal from prod_blocklist
 			remove $value
 		}
 	}
-	# the newips arrays now contain only the remaining entries to be added to prod_blocklist
 	:for i from=0 to=[:len $newips] do={
 		:if ([:len ($newips->($i))] > 0) do={
 			add list=prod_blocklist address=($newips->($i))
