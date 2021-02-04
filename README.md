@@ -162,9 +162,9 @@ What if we did not import new_blocklist into an address-list but instead into a 
 			remove $value
 		}
 	}
-	:foreach value in=$newips do={
-		:if ($value != "") do={
-			add list=prod_blocklist address="$value"
+	:foreach ip in=$newips do={
+		:if ($ip != "") do={
+			add list=prod_blocklist address="$ip"
 		}
 	}
 }
