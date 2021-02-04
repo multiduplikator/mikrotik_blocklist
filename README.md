@@ -162,7 +162,7 @@ What if we did not import new_blocklist into an address-list but instead into a 
 			remove $value
 		}
 	}
-	:for i from=0 to=[:len $newips] do={
+	:for i from=0 to=([:len $newips] - 1) do={
 		:if ([:len ($newips->($i))] > 0) do={
 			add list=prod_blocklist address=($newips->($i))
 		}
