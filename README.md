@@ -130,7 +130,7 @@ Well, then let us try this with arrays. Adding in a few more comments to make it
 	}
 	# the newkeys and newips arrays now contain only the remaining entries
 	# to be added to prod_blocklist and removed from new_blocklist
-	:for i from=0 to=[:len $newkeys] do={
+	:for i from=0 to=([:len $newkeys] - 1) do={
 		:if ([:len ($newkeys->($i))] > 0) do={
 			add list=prod_blocklist address=($newips->($i))
 			remove ($newkeys->($i))
