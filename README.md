@@ -2,7 +2,7 @@
 In an attempt to make the solution compact as possible, we are trying to use prefix aggregation on a merged set of source lists.
 This should increase the performance on the router while minimizing ressource usage and maintenance time.
 
-Currently, this list updates every 6h - while working out what a good frequency would be.
+Currently, this list updates every 3h - while working out what a good frequency would be.
 
 The following is ment as a reference for the blocklist sources, regex and basic mechanics - by no means should you cut, paste and run this in a production environement ... unless you add some proper error handling amongst other bells and whistles. 
 
