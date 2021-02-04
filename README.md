@@ -91,7 +91,7 @@ A better approach would be to work with two lists (e.g. prod_blocklist and new_b
 } 
 ```
 
-Well, then let us try this with arrays. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we have indication that it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. This takes about 110-130sec for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
+Well, then let us try this with arrays. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we have indication that it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. This takes about 140-180sec for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
 
 **THE FOLLOWING WORKS MUCH FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**
 
@@ -138,7 +138,7 @@ Well, then let us try this with arrays. Adding in a few more comments to make it
 	}
 }
 ```
-What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 70-90sec for some 26k entries to process. Here we go, commenting only the key changes in mechanics ...
+What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 90-140sec for some 26k entries to process. Here we go, commenting only the key changes in mechanics ...
 
 **THIS IS BY FAR THE FASTEST, YET**
 
