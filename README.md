@@ -169,6 +169,6 @@ What if we did not import new_blocklist into an address-list but instead into a 
 	}
 }
 
-# unset global newips array
-:global newips [:toarray ""]
+# remove global newips array
+:set newips
 ```
