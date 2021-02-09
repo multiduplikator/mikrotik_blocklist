@@ -172,3 +172,9 @@ What if we did not import new_blocklist into an address-list but instead into a 
 # remove global newips array
 :set newips
 ```
+
+PS:
+I have tried various approached to circumvent the costly :find and reduce the BigO. Most of which involve sorting the arrays and/or address lists.
+Bubble sorting, merge sorting, quick sorting, etc. and even using an associative array and exploit the automatic array sorting of mikrotik scripting.
+Unfortunately, the sorting step is not trivial, since we have to deal with ip-prefixes as well and that does lend itslef to easy comparison.
+Long story short, they all work as expected, but the benefits seem to come only with much larger lists.
