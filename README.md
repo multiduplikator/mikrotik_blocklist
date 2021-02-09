@@ -32,7 +32,7 @@ Then we remove multicast 224.0.0.0/4 and RFC6890 not global IP/CIDRs since these
 Next, we aggregate (using https://github.com/tycho/aggregate-prefixes), strip /32 again (save some bits), and add RFC6890 reserved 240.0.0.0/4, which will give us the raw blocklist (which can be used e.g. as replacement for the "bad_ip4" address list in the mikrotik example above) .
 
 ```
-cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|0\.|10\.|100\.[6-9][0-9]\.|100\.1[0-1][0-9]\.|100\.12[0-7]\.|169\.254\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|198\.1[8-9]\.)/d' | aggregate-prefixes | sed 's/\/32$//' | sed '$a\240.0.0.0/4' > blocklist.txt ; (($? != 0)) && error=1
+cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|0\.|10\.|100\.[6-9][0-9]\.|100\.1[0-1][0-9]\.|100\.12[0-7]\.|169\.254\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|198\.1[8-9]\.)/d' | aggregate-prefixes | sed 's/\/32$//' | sed '$a\240.0.0.0/4' > blocklist.txt
 ```
 
 Finally, we generate mikrotik rsc versions of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise). One for address-list based approach, and one for global array approach.
