@@ -27,12 +27,12 @@ grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
 
 Now, we merge all list entries, extraxt IP/CIDR information, and add missing /32 where needed (for aggregate-prefix to work).
 
-Then we remove 0.0.0.0/8, 192.168.0.0/16 and 224.0.0.0/4 since these should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall
+Then we remove 0.0.0.0/8, 192.168.0.0/16, 10.0.0.0/8 and 224.0.0.0/4 since these should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall
 
 Next, we aggregate (using https://github.com/tycho/aggregate-prefixes) and strip /32 again (save some bits), which will give us the raw blocklist.
 
 ```
-cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|0\.)/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
+cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|0\.|10\.)/d' | aggregate-prefixes | sed 's/\/32$//' > blocklist.txt
 ```
 
 Finally, we generate mikrotik rsc versions of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise). One for address-list based approach, and one for global array approach.
