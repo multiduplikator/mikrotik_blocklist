@@ -8,7 +8,7 @@ The following is ment as a reference for the blocklist sources, regex and basic 
 
 ### Aggregated blocklist for mikrotik (and others)
 
-First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later)
+First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later). In case your version of wget is a bit older, you might need to add '--secure-protocol=TLSv1_2' to make it download.
 
 ```
 wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
