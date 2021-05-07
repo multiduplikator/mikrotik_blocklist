@@ -15,10 +15,10 @@ wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
 wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
 wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
 wget -O malc0de.out https://malc0de.com/bl/IP_Blacklist.txt
-# blocklist.de currently has poblems
+# blocklist.de currently has intermittent poblems
 wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
 # using cinsarmy until blocklist.de is back
-wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt ; (($? != 0)) && error=1
+wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
 wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
 wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
@@ -27,6 +27,27 @@ wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
 wget -O dshield.in https://feeds.dshield.org/block.txt
 grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
 ```
+
+Alternatively, we could do the grab with curl (`-s` for silence):
+
+```
+curl https://www.spamhaus.org/drop/drop.txt -o spamhaus_drop.out -s
+curl https://www.spamhaus.org/drop/edrop.txt -o spamhaus_edrop.out -s
+curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out -s
+curl https://malc0de.com/bl/IP_Blacklist.txt -o malc0de.out -s
+# blocklist.de currently has intermittent poblems
+curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
+# using cinsarmy until blocklist.de is back
+curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
+curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
+curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -s
+curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
+
+# dshield entires are in /24 
+curl https://feeds.dshield.org/block.txt -o dshield.in -s
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
+```
+
 
 Now, we merge all list entries, extraxt IP/CIDR information, and add missing /32 where needed (for aggregate-prefix to work).
 
