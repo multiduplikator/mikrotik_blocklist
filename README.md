@@ -53,7 +53,7 @@ Now, we merge all list entries, extraxt IP/CIDR information, and add missing /32
 
 Then we remove multicast 224.0.0.0/4 and RFC6890 not global IP/CIDRs since these should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall
 
-Next, we aggregate (using https://github.com/tycho/aggregate-prefixes), strip /32 again (save some bits), and add RFC6890 reserved 240.0.0.0/4, which will give us the raw blocklist (which can be used e.g. as replacement for the "bad_ip4" address list in the mikrotik example above). Explicitly excluding 52.113.194.132 which is used for some Microsoft Teams sync services.
+Next, we aggregate (using https://github.com/tycho/aggregate-prefixes), strip /32 again (save some bits), and add RFC6890 reserved 240.0.0.0/4, which will give us the raw blocklist (which can be used e.g. as replacement for the "bad_ip4" address list in the mikrotik example above). Explicitly excluding 52.113.194.132 which is used for some Microsoft Teams sync services - that now has made in on firehol_l2.
 
 ```
 cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|52\.113\.194\.132|0\.)/d' | aggregate-prefixes | sed 's/\/32$//' | sed '$a\240.0.0.0/4' > blocklist.txt
