@@ -15,10 +15,9 @@ wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
 wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
 wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
 wget -O malc0de.out https://malc0de.com/bl/IP_Blacklist.txt
-# blocklist.de currently has intermittent poblems
 wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
-# using cinsarmy until blocklist.de is back
-wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
+# using cinsarmy should blocklist.de be down
+# wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
 wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
 wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
