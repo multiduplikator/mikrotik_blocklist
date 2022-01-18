@@ -20,7 +20,8 @@ wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
 # wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
 wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
-wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
+# level 2 might be too much
+# wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
 
 # dshield entires are in /24 
 wget -O dshield.in https://feeds.dshield.org/block.txt
