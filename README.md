@@ -41,7 +41,7 @@ curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
 curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
 curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -s
 # level 2 might be too much
-curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
+# curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
 
 # dshield entires are in /24 
 curl https://feeds.dshield.org/block.txt -o dshield.in -s
