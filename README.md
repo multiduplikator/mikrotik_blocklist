@@ -35,12 +35,12 @@ curl https://www.spamhaus.org/drop/drop.txt -o spamhaus_drop.out -s
 curl https://www.spamhaus.org/drop/edrop.txt -o spamhaus_edrop.out -s
 curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out -s
 curl https://malc0de.com/bl/IP_Blacklist.txt -o malc0de.out -s
-# blocklist.de currently has intermittent poblems
 curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
-# using cinsarmy until blocklist.de is back
-curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
+# using cinsarmy should blocklist.de be down
+# curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
 curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
 curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -s
+# level 2 might be too much
 curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
 
 # dshield entires are in /24 
