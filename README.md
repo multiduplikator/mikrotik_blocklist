@@ -25,7 +25,7 @@ wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
 
 # dshield entires are in /24 
 wget -O dshield.in https://feeds.dshield.org/block.txt
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 ```
 
 Alternatively, we could do the grab with curl (`-s` for silence):
@@ -45,7 +45,7 @@ curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -
 
 # dshield entires are in /24 
 curl https://feeds.dshield.org/block.txt -o dshield.in -s
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' |  > dshield.out
+grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 ```
 
 
