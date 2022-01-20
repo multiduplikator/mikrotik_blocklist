@@ -16,12 +16,10 @@ wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
 wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
 wget -O malc0de.out https://malc0de.com/bl/IP_Blacklist.txt
 wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
-# using cinsarmy should blocklist.de be down
-# wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
+wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
 wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
-# level 2 might be too much
-# wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
+wget -O firehol_l2.out https://iplists.firehol.org/files/firehol_level2.netset
 
 # dshield entires are in /24 
 wget -O dshield.in https://feeds.dshield.org/block.txt
@@ -36,12 +34,10 @@ curl https://www.spamhaus.org/drop/edrop.txt -o spamhaus_edrop.out -s
 curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out -s
 curl https://malc0de.com/bl/IP_Blacklist.txt -o malc0de.out -s
 curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
-# using cinsarmy should blocklist.de be down
-# curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
+curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
 curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
 curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -s
-# level 2 might be too much
-# curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
+curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
 
 # dshield entires are in /24 
 curl https://feeds.dshield.org/block.txt -o dshield.in -s
