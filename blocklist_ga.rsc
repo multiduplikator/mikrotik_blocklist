@@ -1922,7 +1922,6 @@
 :set newips (newips,"153.93.0.0/16")
 :set newips (newips,"153.126.165.175")
 :set newips (newips,"154.0.64.0/18")
-:set newips (newips,"154.79.244.182")
 :set newips (newips,"154.79.251.172")
 :set newips (newips,"155.35.1.0/24")
 :set newips (newips,"155.35.34.0/23")
