@@ -17163,7 +17163,6 @@
 :set newips (newips,"200.73.131.233")
 :set newips (newips,"200.73.135.101")
 :set newips (newips,"200.73.140.84")
-:set newips (newips,"200.75.131.234")
 :set newips (newips,"200.76.187.17")
 :set newips (newips,"200.83.98.31")
 :set newips (newips,"200.85.196.131")
