@@ -4815,7 +4815,6 @@
 :set newips (newips,"86.107.72.0/24")
 :set newips (newips,"86.107.193.0/24")
 :set newips (newips,"86.107.194.0/23")
-:set newips (newips,"86.131.118.124")
 :set newips (newips,"86.163.183.46")
 :set newips (newips,"86.180.31.38")
 :set newips (newips,"86.184.85.199")
