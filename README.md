@@ -16,7 +16,6 @@ First, we grab the lists and extract IP/CIDR information from them (adding /32 w
 wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
 wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
 wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
-wget -O malc0de.out https://malc0de.com/bl/IP_Blacklist.txt
 wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
 wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
 wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
@@ -34,7 +33,6 @@ Alternatively, we could do the grab with curl (`-s` for silence):
 curl https://www.spamhaus.org/drop/drop.txt -o spamhaus_drop.out -s
 curl https://www.spamhaus.org/drop/edrop.txt -o spamhaus_edrop.out -s
 curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out -s
-curl https://malc0de.com/bl/IP_Blacklist.txt -o malc0de.out -s
 curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
 curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
 curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
