@@ -27,8 +27,7 @@ wget -O dshield.in https://feeds.dshield.org/block.txt
 grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 
 # add tor_exits
-wget -O tor_exits.in https://raw.githubusercontent.com/stathis/ros-tor-exits/master/tor-exits.rsc
-cat tor_exits.in | awk -F  "=" '/1/ {print $3}' > tor_exits.out
+wget -O tor_exits.out https://check.torproject.org/torbulkexitlist
 ```
 
 Alternatively, we could do the grab with curl (`-s` for silence):
@@ -48,8 +47,7 @@ curl https://feeds.dshield.org/block.txt -o dshield.in -s
 grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
 
 # add tor_exits
-curl https://raw.githubusercontent.com/stathis/ros-tor-exits/master/tor-exits.rsc -o tor_exits.in -s
-cat tor_exits.in | awk -F  "=" '/1/ {print $3}' > tor_exits.out
+curl https://check.torproject.org/torbulkexitlist -o tor_exits.out -s
 ```
 
 
