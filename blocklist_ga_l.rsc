@@ -10277,7 +10277,6 @@
 :set newips (newips,"100.38.237.200")
 :set newips (newips,"100.38.242.113")
 :set newips (newips,"100.42.74.223")
-:set newips (newips,"100.64.0.0/10")
 :set newips (newips,"101.0.73.142")
 :set newips (newips,"101.1.82.7")
 :set newips (newips,"101.3.121.242")
