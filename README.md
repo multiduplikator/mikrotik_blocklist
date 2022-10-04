@@ -13,6 +13,7 @@ The following is ment as a reference for the blocklist sources, regex and basic 
 First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later). In case your version of wget is a bit older, you might need to add `--secure-protocol=TLSv1_2` to make it download.
 
 ```
+wget -O tor_exits.out https://check.torproject.org/torbulkexitlist
 wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
 wget -O spamhaus_edrop.out https://www.spamhaus.org/drop/edrop.txt
 wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
@@ -33,6 +34,7 @@ wget -O tor_exits.out https://check.torproject.org/torbulkexitlist
 Alternatively, we could do the grab with curl (`-s` for silence):
 
 ```
+curl https://check.torproject.org/torbulkexitlist -o tor_exits.out -s
 curl https://www.spamhaus.org/drop/drop.txt -o spamhaus_drop.out -s
 curl https://www.spamhaus.org/drop/edrop.txt -o spamhaus_edrop.out -s
 curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out -s
@@ -40,7 +42,7 @@ curl https://lists.blocklist.de/lists/all.txt-o blocklist_de.out -s
 curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out -s
 curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out -s
 curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out -s
-curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.ou -s
+curl https://iplists.firehol.org/files/firehol_level2.netset -o firehol_l2.out -s
 
 # dshield entires are in /24 
 curl https://feeds.dshield.org/block.txt -o dshield.in -s
