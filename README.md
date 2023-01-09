@@ -210,7 +210,7 @@ Unfortunately, the sorting step is not trivial, since we have to deal with ip-pr
 Long story short, they all work as expected, but the benefits seem to come only with much larger lists. **Ideas welcome!**
 
 
-###SAMPLE SCRIPTS TO USE IN ROUTEROS###
+###SAMPLE SCRIPTS TO USE IN ROUTEROS
 
 **1 - Download (Policy: ftp, read, write, test Schedule: every 3h)**
 
