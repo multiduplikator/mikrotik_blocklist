@@ -173,13 +173,15 @@ What if we did not import new_blocklist into an address-list but instead into a 
 ```
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
 
-:local prdkeys [find list=prod_blocklist]
 # load blocklist into global array newips
 /import file-name=blocklist_ga.rsc
-# load newips array (created with /import above)  
-:global newips
 
 /ip firewall address-list
+
+:local prdkeys [find list=prod_blocklist]
+
+# load newips array (created with /import above)  
+:global newips
 
 :if ([:len $newips] > 0 ) do={
 	:foreach value in=$prdkeys do={
