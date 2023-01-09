@@ -206,3 +206,49 @@ I have tried various approaches to **avoid the costly :find** and reduce the Big
 Bubble sorting, merge sorting, quick sorting, etc. and using an associative array and exploit the automatic array sorting of mikrotik scripting.
 Unfortunately, the sorting step is not trivial, since we have to deal with ip-prefixes as well and that does not lend itslef to easy comparison.
 Long story short, they all work as expected, but the benefits seem to come only with much larger lists. **Ideas welcome!**
+
+
+**SAMPLE SCRIPTS TO USE IN ROUTEROS**
+1 - Download (Policy: ftp, read, write, test Schedule: every 3h)
+
+```
+:log info "blocklist-DL started"
+/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga_l.rsc" mode=https
+:log info "blocklist-DL finished"
+```
+
+2 - Download (Policy: read, write, test Schedule: every 3h, 5min after download above)
+```
+:log info "blocklist-REP started"
+:log info "blocklist-REP started - disabling info"
+/system logging disable 0
+
+/import file-name=blocklist_ga_l.rsc
+
+/ip firewall address-list
+
+:local prdkeys [find list=prod_blocklist]
+:global newips
+
+:if ([:len $newips] > 0 ) do={
+	:foreach value in=$prdkeys do={
+		:local keyindex [:find $newips [get $value address]]
+		:if ($keyindex > 0) do={
+			:set ($newips->($keyindex)) ""
+		} else={
+			remove $value
+		}
+	}
+	:foreach value in=$newips do={
+		:if ($value != "") do={
+			add list=prod_blocklist address="$value"
+		}
+	}
+}
+
+:set newips
+
+/system logging enable 0
+:log info "blocklist-REP finished - enabled info"
+:log info "blocklist-REP finished"
+```
