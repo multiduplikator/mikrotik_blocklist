@@ -233,7 +233,11 @@ Long story short, they all work as expected, but the benefits seem to come only 
 :local prdkeys [find list=prod_blocklist]
 :global newips
 
-:if ([:len $newips] > 0 ) do={
+:local countnew 0
+:local countremoved 0
+:local counttotal [:len $newips]
+
+:if ($counttotal > 0 ) do={
 	:foreach value in=$prdkeys do={
 		:local keyindex [:find $newips [get $value address]]
 		:if ($keyindex > 0) do={
@@ -244,7 +248,10 @@ Long story short, they all work as expected, but the benefits seem to come only 
 	}
 	:foreach value in=$newips do={
 		:if ($value != "") do={
-			add list=prod_blocklist address="$value"
+			:do {
+                add list=prod_blocklist address="$value";
+                :set countnew ($countnew+1);
+            } on-error {:put "Error: $value"}"
 		}
 	}
 }
@@ -253,5 +260,5 @@ Long story short, they all work as expected, but the benefits seem to come only 
 
 /system logging enable 0
 :log info "blocklist-REP finished - enabled info"
-:log info "blocklist-REP finished"
+:log info "blocklist-REP finished:  $countremoved removed, $countnew new / $counttotal  total"
 ```
