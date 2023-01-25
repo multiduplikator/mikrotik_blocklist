@@ -235,6 +235,7 @@ Long story short, they all work as expected, but the benefits seem to come only 
 
 :local countnew 0
 :local countremoved 0
+:local counterror 0
 :local counttotal [:len $newips]
 
 :if ($counttotal > 0 ) do={
@@ -251,7 +252,7 @@ Long story short, they all work as expected, but the benefits seem to come only 
 			:do {
                 add list=prod_blocklist address="$value";
                 :set countnew ($countnew+1);
-            } on-error {:put "Error: $value"}"
+            } on-error {:put "Error: $value"; :set counterror ($counterror+1); }
 		}
 	}
 }
@@ -260,5 +261,5 @@ Long story short, they all work as expected, but the benefits seem to come only 
 
 /system logging enable 0
 :log info "blocklist-REP finished - enabled info"
-:log info "blocklist-REP finished:  $countremoved removed, $countnew new / $counttotal  total"
+:log info "blocklist-REP finished:  $countremoved removed, $countnew new, $counterror errors / $counttotal  total"
 ```
