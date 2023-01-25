@@ -249,10 +249,10 @@ Long story short, they all work as expected, but the benefits seem to come only 
 	}
 	:foreach value in=$newips do={
 		:if ($value != "") do={
-			:do {
-                add list=prod_blocklist address="$value";
+			:do { 											# do/on-error only works with ROS 6.2 and upwards
+                add list=prod_blocklist address="$value"; 
                 :set countnew ($countnew+1);
-            } on-error {:put "Error: $value"; :set counterror ($counterror+1); }
+            } on-error {:set counterror ($counterror+1) } 	# do/on-error only works with ROS 6.2 and upwards
 		}
 	}
 }
