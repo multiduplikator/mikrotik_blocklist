@@ -36,7 +36,7 @@ The following are automatically excluded:
 - Loopback: `127.0.0.0/8`
 - Multicast: `224.0.0.0/4`
 - Reserved: `240.0.0.0/4` (added to blocklist), `0.0.0.0/8`
-- Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25`
+- Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25` (Microsoft Teams)
 
 ---
 
@@ -344,7 +344,7 @@ This script performs differential updates — only adding new entries and removi
 
 2. **Index 0 Bug Fix:** Previous versions used `:if ($keyindex > 0)` which incorrectly handled IPs at array index 0. The fix uses `:if ([:typeof $keyindex] != "nil")` to properly detect if an IP was found.
 
-3. **Performance:** Expect 90-180 seconds for ~25k entries on a CCR-1036. The differential approach is significantly faster than full replacement and maintains continuous protection.
+3. **Performance:** Expect 90-150 seconds for ~25k entries on a CCR-1036 or CCR-2004
 
 4. **Logging:** The script disables logging rule 0 during execution to prevent thousands of "address-list entry added/removed" log messages.
 
