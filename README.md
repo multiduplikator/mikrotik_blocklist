@@ -18,16 +18,17 @@ This project provides pre-aggregated blocklists optimized for MikroTik routers. 
 
 ## Sources
 
-| Source | Description |
-|--------|-------------|
-| [Tor Exit Nodes](https://github.com/SecOps-Institute/Tor-IP-Addresses) | Tor exit node IPs |
-| [Spamhaus DROP](https://www.spamhaus.org/drop/) | "Don't Route Or Peer" list |
-| [SSL Blacklist](https://sslbl.abuse.ch/) | Botnet C&C servers |
-| [Blocklist.de](https://lists.blocklist.de/) | Fail2ban reported IPs |
-| [CINS Army](https://cinsscore.com/) | Collective Intelligence Network Security |
-| [Feodo Tracker](https://feodotracker.abuse.ch/) | Banking trojan C&C servers |
-| [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated threat intelligence |
-| [IPsum](https://github.com/stamparm/ipsum) | Daily threat intelligence feed |
+| Source | Description | Standard | Large | XL |
+|--------|-------------|:--------:|:-----:|:--:|
+| [Tor Exit Nodes](https://github.com/SecOps-Institute/Tor-IP-Addresses) | Tor exit node IPs | ✓ | ✓ | ✓ |
+| [Spamhaus DROP](https://www.spamhaus.org/drop/) | "Don't Route Or Peer" list | ✓ | ✓ | ✓ |
+| [SSL Blacklist](https://sslbl.abuse.ch/) | Botnet C&C servers | ✓ | ✓ | ✓ |
+| [Blocklist.de](https://lists.blocklist.de/) | Fail2ban reported IPs | ✓ | ✓ | ✓ |
+| [Feodo Tracker](https://feodotracker.abuse.ch/) | Banking trojan C&C servers | ✓ | ✓ | ✓ |
+| [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated threat intelligence | ✓ | ✓ | ✓ |
+| [IPsum Level 3](https://github.com/stamparm/ipsum) | High-confidence threat IPs (3+ hits) | ✓ | ✓ | ✓ |
+| [CINS Army](https://cinsscore.com/) | Collective Intelligence Network Security | | ✓ | ✓ |
+| [IPsum Level 1](https://github.com/stamparm/ipsum) | Broader threat IPs (1+ hits) | | | ✓ |
 
 ## Filtered Addresses
 
