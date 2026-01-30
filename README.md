@@ -1,383 +1,355 @@
-# mikrotik blocklist (aka blacklist)
-In an attempt to make the solution compact as possible, we are trying to use prefix aggregation on a merged set of source lists.
-This should increase the performance on the router while minimizing ressource usage and maintenance time.
+# MikroTik Blocklist
 
-Currently, this list updates every 3h - while working out what a good frequency would be.
+An aggregated IP blocklist for MikroTik RouterOS firewalls, compiled from multiple threat intelligence sources.
 
-There are now two lists maintained. The "normal" one, excluding cinsarmy and (ca. 25k entries). And another one with suffix "\_l", including everything (ca. 30k entries).
-Yet, one more with suffix "\_xl", including everything and ipsum l1 (ca. 170k entries).
+## Overview
 
-The following is ment as a reference for the blocklist sources, regex and basic mechanics - by no means should you cut, paste and run this in a production environement ... unless you add some proper error handling amongst other bells and whistles. 
+This project provides pre-aggregated blocklists optimized for MikroTik routers. By using CIDR prefix aggregation, we minimize the number of address-list entries while maintaining comprehensive coverage — improving router performance and reducing memory usage.
 
-### Aggregated blocklist for mikrotik (and others)
+**Update frequency:** Every 3 hours
 
-First, we grab the lists and extract IP/CIDR information from them (adding /32 where missing for aggregation later). In case your version of wget is a bit older, you might need to add `--secure-protocol=TLSv1_2` to make it download.
+## Available Lists
 
-```
-wget -O tor_exits.out https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst
-wget -O spamhaus_drop.out https://www.spamhaus.org/drop/drop.txt
-wget -O sslbl.out https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
-wget -O blocklist_de.out https://lists.blocklist.de/lists/all.txt
-wget -O cinsarmy.out https://cinsscore.com/list/ci-badguys.txt
-wget -O feodo.out https://feodotracker.abuse.ch/downloads/ipblocklist.txt
-wget -O firehol_l1.out https://iplists.firehol.org/files/firehol_level1.netset
-wget -O ipsum_l1.out https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt
+| List | File | Entries | Sources |
+|------|------|---------|---------|
+| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~20k | Core threat feeds |
+| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~25k | Core + CINS Army |
+| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~68k | All sources including IPsum L1 |
 
-# dshield entires are in /24 
-wget -O dshield.in https://feeds.dshield.org/block.txt
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
-```
+## Sources
 
-Alternatively, we could do the grab with curl (`-s` for silence):
+| Source | Description |
+|--------|-------------|
+| [Tor Exit Nodes](https://github.com/SecOps-Institute/Tor-IP-Addresses) | Tor exit node IPs |
+| [Spamhaus DROP](https://www.spamhaus.org/drop/) | "Don't Route Or Peer" list |
+| [SSL Blacklist](https://sslbl.abuse.ch/) | Botnet C&C servers |
+| [Blocklist.de](https://lists.blocklist.de/) | Fail2ban reported IPs |
+| [CINS Army](https://cinsscore.com/) | Collective Intelligence Network Security |
+| [Feodo Tracker](https://feodotracker.abuse.ch/) | Banking trojan C&C servers |
+| [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated threat intelligence |
+| [IPsum](https://github.com/stamparm/ipsum) | Daily threat intelligence feed |
 
-```
-curl https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst -o tor_exits.out_s
-curl https://www.spamhaus.org/drop/drop.txt -o spamhaus_drop.out_s
-curl https://sslbl.abuse.ch/blacklist/sslipblacklist.txt -o sslbl.out_s
-curl https://lists.blocklist.de/lists/all.txt -o blocklist_de.out_s
-curl https://cinsscore.com/list/ci-badguys.txt -o cinsarmy.out_l
-curl https://feodotracker.abuse.ch/downloads/ipblocklist.txt -o feodo.out_s
-curl https://iplists.firehol.org/files/firehol_level1.netset -o firehol_l1.out_s
-curl https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt -o ipsum_l1.out_xl
-curl https://raw.githubusercontent.com/stamparm/ipsum/master/levels/333xt -o ipsum_l3.out_s
+## Filtered Addresses
 
-# dshield entires are in /24 
-curl https://feeds.dshield.org/block.txt -o dshield.in -s
-grep '^[1-9]' dshield.in | awk '{print $1"/24"}' > dshield.out
-```
+The following are automatically excluded:
+- Private ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- Loopback: `127.0.0.0/8`
+- Multicast: `224.0.0.0/4`
+- Reserved: `240.0.0.0/4` (added to blocklist), `0.0.0.0/8`
+- Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25`
 
-Now, we merge all list entries, extraxt IP/CIDR information, and add missing /32 where needed (for aggregate-prefix to work).
+---
 
-Then we remove multicast 224.0.0.0/4 and RFC6890 not global IP/CIDRs since these should be handled in an independent firewall rule, e.g. see here https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall
+## Blocklist Generation
 
-Next, we aggregate (using https://github.com/tycho/aggregate-prefixes), strip /32 again (save some bits), and add RFC6890 reserved 240.0.0.0/4, which will give us the raw blocklist (which can be used e.g. as replacement for the "bad_ip4" address list in the mikrotik example above). Explicitly excluding 52.113.194.132 which is used for some Microsoft Teams sync services - that now has made in on firehol_l2.
+The blocklist is generated using a bash script with embedded Python for IP extraction, validation, and CIDR aggregation.
 
-```
-cat *.out | grep -Eo '(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?' | awk '!/\//{$0=$0"/32"}{print}' | sed -E '/^(22[4-9]|23[0-9]|192\.168|52\.113\.194\.132|0\.)/d' | aggregate-prefixes | sed 's/\/32$//' | sed '$a\240.0.0.0/4' > blocklist.txt
-```
+### Dependencies
 
-Finally, we generate mikrotik rsc versions of the raw blocklist for easy importing (note that we quoted the IP/CIDR, since on some mikrotiks the CIDR block will get lost otherwise). One for address-list based approach, and one for global array approach.
+- `bash`
+- `curl`
+- `python3` (3.3+ with built-in `ipaddress` module)
+- `git` (for publishing)
 
-```
-# address-list approach
-cat blocklist.txt | awk '{print "add list=new_blocklist address=\""$0"\" comment=\"blocklist\""}' > blocklist.rsc
-sed -i '1 i\\/ip firewall address-list' blocklist.rsc
+### Generator Script
 
-# array approach
-cat blocklist.txt | awk '{print ":set newips (newips,\""$0"\")"}' > blocklist_ga.rsc
-sed -i '1 i\\:global newips \[\:toarray \"\"\]' blocklist_ga.rsc
-```
+```bash
+#!/bin/bash
+set -euo pipefail
 
-### Downloading and updating on the mikrotik
-You might want to consider using this blocklist in the ip firewall raw table. Also be aware that multicast (i.e. 224.0.0.0/4) should not be blocked to allow for IPTV to work.
-For mikrotik starters, you can consult https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall to get going...and make sure you add the actual firewall rules to make use of the blocklist.
+WORKDIR="/path/to/working/directory"
+OUTDIR="/path/to/output/directory"
 
-```
-/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
-/ip firewall address-list remove [find where list="blocklist"]; /import file-name=blocklist.rsc
-```
+cd "$WORKDIR"
+rm -f *.out_* *.txt *.rsc 2>/dev/null || true
 
-Clearly, the above mechanism leads to a short window of time, where blocking deteriorates, as the blocklist is emptied out and then reloaded.
-However, its performance in terms of loading time is quite good.
-
-A better approach would be to work with two lists (e.g. prod_blocklist and new_blocklist). With basic scripting we would do something like the following.
-
-**THE FOLLOWING IS EXTREMELY SLOW! DON'T RUN THIS!**
-
-```
-# fetch the blocklist to file
-/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
-
-# load blocklist
-/import file-name=blocklist.rsc
-
-# check if blocklist exists with entries
-:if ([:len [/ip firewall address-list find list=new_blocklist]] > 0 ) do={
-	# remove nonexisting in new_blocklist from prod_blocklist, and existing in both from new_blocklist
-	:foreach i in=[/ip firewall address-list find list=prod_blocklist] do={
-		:local oldaddress [/ip firewall address-list get $i address]
-		:local existnew [/ip firewall address-list find where list=new_blocklist and address=$oldaddress]
-		:if ([:len $existnew] > 0) do={
-			/ip firewall address-list remove $existnew
-		} else={
-			/ip firewall address-list remove $i
-		}
-	}
-	# add remaining new blocklist entries to prod_blocklist
-	:foreach j in=[/ip firewall address-list find list=new_blocklist] do={
-		:local newaddress [/ip firewall address-list get $j address]
-		/ip firewall address-list add list=prod_blocklist address=$newaddress
-		/ip firewall address-list remove $j
-	}
-} 
-```
-
-Well, then let us try this with arrays. Adding in a few more comments to make it easier to understand. Granted, there are some more corners that could be cut, but this way we have indication that it worked if new_blocklist has 0 (zero) entries on exit, and we try to be memory efficient by reducing list entries as early as possible. This takes about 140-180sec for two lists with some 26k entries each on a CCR-1036, for example. Since blocking does not deteriorate during this process, it is tolerable...
-
-**THE FOLLOWING WORKS MUCH FASTER, ACTUALLY QUITE DECENT PERFORMANCE ALSO ON LARGER LISTS**
-
-```
-# fetch the blocklist to file
-/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist.rsc" mode=https
-
-# load blocklist
-/import file-name=blocklist.rsc
-
-# enter the address-list section
-/ip firewall address-list
-
-# load blocklists into array
-:local prdkeys [find list=prod_blocklist]
-:local newkeys [find list=new_blocklist]
-
-# check that we actually have new_blocklist entries
-:if ([:len $newkeys] > 0 ) do={
-	# translate newkeys to newips
-	:local newips [:toarray ""]
-	:foreach value in=$newkeys do={:set newips (newips,[get $value address])}
-	# remove exisiting in both from new_blocklist, and nonexisting in new_blocklist from prod_blocklist
-	:foreach value in=$prdkeys do={
-		:local keyindex [:find $newips [get $value address]]
-		:if ($keyindex > 0) do={
-			# removal from new_blocklist
-			remove ($newkeys->($keyindex))
-			# erasing array entries to speedup next search and prepare for next stage
-			:set ($newkeys->($keyindex)) ""
-			:set ($newips->($keyindex)) ""
-		} else={
-			# removal from prod_blocklist
-			remove $value
-		}
-	}
-	# the newkeys and newips arrays now contain only the remaining entries
-	# to be added to prod_blocklist and removed from new_blocklist
-	:for i from=0 to=([:len $newkeys] - 1) do={
-		:if ([:len ($newkeys->($i))] > 0) do={
-			add list=prod_blocklist address=($newips->($i))
-			remove ($newkeys->($i))
-		}
-	}
-}
-```
-What if we did not import new_blocklist into an address-list but instead into a global array? We would not need two address-lists, and hence save a significant amount of operations, e.g. initial import into new_blocklist address-list, removal of entries therein, one array less to manipulate. Down to about 90-140sec for some 26k entries to process. Here we go, commenting only the key changes in mechanics ...
-
-**THIS IS BY FAR THE FASTEST, YET**
-
-```
-/tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga.rsc" mode=https
-
-# load blocklist into global array newips
-/import file-name=blocklist_ga.rsc
-
-/ip firewall address-list
-
-:local prdkeys [find list=prod_blocklist]
-
-# load newips array (created with /import above)  
-:global newips
-
-:if ([:len $newips] > 0 ) do={
-	:foreach value in=$prdkeys do={
-		:local keyindex [:find $newips [get $value address]]
-		:if ($keyindex > 0) do={
-			:set ($newips->($keyindex)) ""
-		} else={
-			remove $value
-		}
-	}
-	:foreach ip in=$newips do={
-		:if ($ip != "") do={
-			add list=prod_blocklist address="$ip"
-		}
-	}
+# Download function - exits on failure
+download() {
+    local url="$1"
+    local output="$2"
+    local name="$3"
+    
+    if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
+        if [[ -s "$output" ]]; then
+            echo "  ✓ $name"
+        else
+            echo "  ✗ $name (empty file)"
+            exit 1
+        fi
+    else
+        echo "  ✗ $name (download failed)"
+        exit 1
+    fi
 }
 
-# remove global newips array
-:set newips
+echo "Downloading blocklists..."
+
+download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
+         "tor_exits.out_s" "Tor Exit Nodes"
+
+download "https://www.spamhaus.org/drop/drop.txt" \
+         "spamhaus_drop.out_s" "Spamhaus DROP"
+
+download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
+         "sslbl.out_s" "SSL Blacklist"
+
+download "https://lists.blocklist.de/lists/all.txt" \
+         "blocklist_de.out_s" "Blocklist.de"
+
+download "https://cinsscore.com/list/ci-badguys.txt" \
+         "cinsarmy.out_l" "CINS Army"
+
+download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
+         "feodo.out_s" "Feodo Tracker"
+
+download "https://iplists.firehol.org/files/firehol_level1.netset" \
+         "firehol_l1.out_s" "FireHOL L1"
+
+download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
+         "ipsum_l1.out_xl" "IPsum L1"
+
+download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
+         "ipsum_l3.out_s" "IPsum L3"
+
+echo "All downloads successful."
+
+# Python script for extraction, filtering, and aggregation
+python3 << 'PYTHON_SCRIPT'
+import ipaddress
+import re
+import glob
+import sys
+
+# Regex for IPv4 with optional CIDR (with boundary checking to avoid false positives)
+IP_PATTERN = re.compile(
+    r'(?:^|[^\d])('
+    r'(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}'
+    r'(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)'
+    r'(?:/(?:3[0-2]|[12]?\d))?'
+    r')(?:[^\d]|$)'
+)
+
+EXCLUDE_NETWORKS = [
+    ipaddress.ip_network('10.0.0.0/8'),
+    ipaddress.ip_network('172.16.0.0/12'),
+    ipaddress.ip_network('192.168.0.0/16'),
+    ipaddress.ip_network('224.0.0.0/4'),
+    ipaddress.ip_network('240.0.0.0/4'),
+    ipaddress.ip_network('0.0.0.0/8'),
+    ipaddress.ip_network('127.0.0.0/8'),
+]
+
+WHITELIST_IPS = {
+    ipaddress.ip_address('52.113.194.132'),
+    ipaddress.ip_address('35.186.224.25'),
+}
+
+def should_exclude(network):
+    if network.num_addresses == 1:
+        if network.network_address in WHITELIST_IPS:
+            return True
+    for excluded in EXCLUDE_NETWORKS:
+        if network.subnet_of(excluded) or network.overlaps(excluded):
+            return True
+    return False
+
+def extract_networks(files):
+    networks = set()
+    for filepath in files:
+        try:
+            with open(filepath, 'r', errors='ignore') as f:
+                content = f.read()
+                for match in IP_PATTERN.findall(content):
+                    try:
+                        addr = match if '/' in match else f"{match}/32"
+                        net = ipaddress.ip_network(addr, strict=False)
+                        if not should_exclude(net):
+                            networks.add(net)
+                    except ValueError:
+                        continue
+        except FileNotFoundError:
+            print(f"ERROR: {filepath} not found", file=sys.stderr)
+            sys.exit(1)
+    return networks
+
+def aggregate_and_save(files, output_base):
+    networks = extract_networks(files)
+    
+    if not networks:
+        print(f"ERROR: No valid IPs found for {output_base}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Collapse overlapping networks using Python's built-in function
+    aggregated = list(ipaddress.collapse_addresses(sorted(networks)))
+    aggregated.append(ipaddress.ip_network('240.0.0.0/4'))
+    aggregated = sorted(set(aggregated))
+    
+    addresses = []
+    for net in aggregated:
+        addr = str(net.network_address) if net.prefixlen == 32 else str(net)
+        addresses.append(addr)
+    
+    # Plain text list
+    with open(f"{output_base}.txt", 'w') as f:
+        f.write('\n'.join(addresses) + '\n')
+    
+    # Direct import .rsc file
+    with open(f"{output_base}.rsc", 'w') as f:
+        f.write("/ip firewall address-list\n")
+        for addr in addresses:
+            f.write(f'add list=new_blocklist address="{addr}" comment="blocklist"\n')
+    
+    # Array-based .rsc file for differential updates
+    if output_base == "blocklist":
+        ga_filename = "blocklist_ga.rsc"
+    else:
+        ga_filename = output_base.replace("blocklist_", "blocklist_ga_") + ".rsc"
+    
+    with open(ga_filename, 'w') as f:
+        f.write(':global newips [:toarray ""]\n')
+        for addr in addresses:
+            f.write(f':set newips ($newips,"{addr}")\n')
+    
+    print(f"{output_base}: {len(addresses)} entries")
+
+# Build lists with different source combinations
+small_files = glob.glob("*.out_s")
+large_files = glob.glob("*.out_s") + glob.glob("*.out_l")
+xl_files = glob.glob("*.out_*")
+
+aggregate_and_save(small_files, "blocklist")
+aggregate_and_save(large_files, "blocklist_l")
+aggregate_and_save(xl_files, "blocklist_xl")
+PYTHON_SCRIPT
+
+# Copy and publish
+cp blocklist.rsc blocklist_ga.rsc \
+   blocklist_l.rsc blocklist_ga_l.rsc \
+   blocklist_xl.rsc blocklist_ga_xl.rsc \
+   blocklist.txt blocklist_l.txt blocklist_xl.txt \
+   "$OUTDIR/"
+
+cd "$OUTDIR"
+git add -A
+git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
+git push
+
+echo "Done!"
 ```
 
-PS:
-I have tried various approaches to **avoid the costly :find** and reduce the BigO. Most of which involve sorting the arrays and/or address lists.
-Bubble sorting, merge sorting, quick sorting, etc. and using an associative array and exploit the automatic array sorting of mikrotik scripting.
-Unfortunately, the sorting step is not trivial, since we have to deal with ip-prefixes as well and that does not lend itslef to easy comparison.
-Long story short, they all work as expected, but the benefits seem to come only with much larger lists. **Ideas welcome!**
+---
 
+## RouterOS Implementation
 
-### SAMPLE SCRIPTS TO USE IN ROUTEROS
+### Firewall Setup
 
-Thanks @njumaen for the ideas and code snippets! Added some exemplary bells and whistles...
+Before using the blocklist, ensure you have appropriate firewall rules. Consider using the `raw` table for best performance. See [MikroTik's Advanced Firewall Guide](https://help.mikrotik.com/docs/display/ROS/Building+Advanced+Firewall) for details.
 
-**1 - Download (Policy: ftp, read, write, test Schedule: every 3h)**
+Example rule (add to your firewall):
+```
+/ip firewall raw add chain=prerouting src-address-list=prod_blocklist action=drop comment="Drop blocklisted IPs"
+```
+
+### Script 1: Download
+
+**Policy:** `ftp, read, write, test`  
+**Schedule:** Every 3 hours
 
 ```
-:log info "blocklist-DL started"
+:log info "blocklist-DL: started"
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga_l.rsc" mode=https
-:log info "blocklist-DL finished"
+:log info "blocklist-DL: finished"
 ```
 
-**2 - Update - simplest form (Policy: read, write, test Schedule: every 3h, 5min after download above)**
+### Script 2: Differential Update
+
+**Policy:** `read, write, test`  
+**Schedule:** Every 3 hours, 5 minutes after download
+
+This script performs differential updates — only adding new entries and removing stale ones. This approach maintains continuous protection without any gap in coverage.
+
 ```
-:log info "blocklist-REP: started"
-:log info "blocklist-REP: started - disabling info"
+:log info "blocklist-DIFF: === STARTED ==="
+:local startTime [/system clock get time]
+
+# Disable logging to prevent flood
 /system logging disable 0
 
-:local duration [/system clock get time]
-
+# Import new IPs into global array
 /import file-name=blocklist_ga_l.rsc
+:global newips
 
+:local totalNew [:len $newips]
+:if ($totalNew = 0) do={
+    /system logging enable 0
+    :log error "blocklist-DIFF: Empty import, aborting"
+    :error "Empty blocklist import"
+}
+
+:log info "blocklist-DIFF: Imported $totalNew entries"
+
+# Process existing entries
 /ip firewall address-list
 
 :local prdkeys [find list=prod_blocklist]
-:global newips
+:local countKept 0
+:local countRemoved 0
 
-:local countnew 0
-:local countremoved 0
-:local counttotal [:len $newips]
-
-:if ($counttotal > 0 ) do={
-	:foreach value in=$prdkeys do={
-		:local keyindex [:find $newips [get $value address]]
-		:if ($keyindex > 0) do={
-			:set ($newips->($keyindex)) ""
-		} else={
-			remove $value
-			:set countremoved ($countremoved+1)
-		}
-	}
-	:foreach value in=$newips do={
-		:if ($value != "") do={
-			add list=prod_blocklist address="$value"
-			:set countnew ($countnew+1)
-		}
-	}
+:foreach entryId in=$prdkeys do={
+    :local addr [get $entryId address]
+    :local keyindex [:find $newips $addr]
+    
+    # Check for nil (not found) - fixes index 0 bug
+    :if ([:typeof $keyindex] != "nil") do={
+        # EXISTS in new list - keep it, blank out to skip later
+        :set ($newips->$keyindex) ""
+        :set countKept ($countKept + 1)
+    } else={
+        # NOT in new list - remove
+        remove $entryId
+        :set countRemoved ($countRemoved + 1)
+    }
 }
 
+:log info "blocklist-DIFF: Kept $countKept, removed $countRemoved"
+
+# Add NEW entries (non-empty values remaining in $newips)
+:local countAdded 0
+
+:foreach addr in=$newips do={
+    :if ($addr != "") do={
+        add list=prod_blocklist address=$addr
+        :set countAdded ($countAdded + 1)
+    }
+}
+
+# Cleanup
 :set newips
-:set duration ([/system clock get time] - $duration)
+
+:local endTime [/system clock get time]
+:local duration ($endTime - $startTime)
 
 /system logging enable 0
-:log info "blocklist-REP: finished - enabled info"
-:log info "blocklist-REP: finished - $countremoved removed, $countnew new, in $duration / $counttotal  total"
+
+:local finalCount [:len [/ip firewall address-list find list=prod_blocklist]]
+
+:log info "blocklist-DIFF: === COMPLETED ==="
+:log info "blocklist-DIFF: Removed=$countRemoved, Added=$countAdded, Total=$finalCount"
+:log info "blocklist-DIFF: Duration=$duration"
 ```
 
-**2b - Update - with error detection, requires ROS >= 6.2 (Policy: read, write, test Schedule: every 3h, 5min after download above)**
+### Important Notes
 
-This introduces about 2-3% performace hit.
+1. **First Run:** On initial setup, `prod_blocklist` won't exist. The script will simply add all entries.
 
-```
-:log info "blocklist-REP: started"
-:log info "blocklist-REP: started - disabling info"
-/system logging disable 0
+2. **Index 0 Bug Fix:** Previous versions used `:if ($keyindex > 0)` which incorrectly handled IPs at array index 0. The fix uses `:if ([:typeof $keyindex] != "nil")` to properly detect if an IP was found.
 
-:local duration [/system clock get time]
+3. **Performance:** Expect 90-180 seconds for ~25k entries on a CCR-1036. The differential approach is significantly faster than full replacement and maintains continuous protection.
 
-/import file-name=blocklist_ga_l.rsc
+4. **Logging:** The script disables logging rule 0 during execution to prevent thousands of "address-list entry added/removed" log messages.
 
-/ip firewall address-list
+---
 
-:local prdkeys [find list=prod_blocklist]
-:global newips
+## License
 
-:local countnew 0
-:local countremoved 0
-:local counttotal [:len $newips]
-:local counterror 0
-
-:if ($counttotal > 0 ) do={
-	:foreach value in=$prdkeys do={
-		:local keyindex [:find $newips [get $value address]]
-		:if ($keyindex > 0) do={
-			:set ($newips->($keyindex)) ""
-		} else={
-			remove $value
-			:set countremoved ($countremoved+1)
-		}
-	}
-	:foreach value in=$newips do={
-		:if ($value != "") do={
-			:do { add list=prod_blocklist address="$value" } on-error { :set counterror ($counterror+1) }
-			:set countnew ($countnew+1)
-		}
-	}
-}
-
-:set newips
-:set duration ([/system clock get time] - $duration)
-
-/system logging enable 0
-:log info "blocklist-REP: finished - enabled info"
-:log info "blocklist-REP: finished - $countremoved removed, $countnew new, $counterror errors, in $duration / $counttotal  total"
-```
-
-**2c - Update - fancy with ROS version detection (Policy: read, write, test Schedule: every 3h, 5min after download above)**
-```
-:log info "blocklist-REP: started"
-
-:local rbootver [/system routerboard get current-firmware]
-:local version ([:tonum [:pick $rbootver 0 1]]*10 + [:tonum [:pick $rbootver 2 3]])
-:local minversion 62
-
-:log info "blocklist-REP: Detected ROS version $rbootver"
-	
-:if ($version >= $minversion ) do={
-	:log info "blocklist-REP: Running with error handling"
-} else={
-	:log info "blocklist-REP: Running without error handling"
-}
-
-:log info "blocklist-REP: disabling info"
-/system logging disable 0
-
-:local duration [/system clock get time]
-
-/import file-name=blocklist_ga_l.rsc
-
-/ip firewall address-list
-
-:local prdkeys [find list=prod_blocklist]
-:global newips
-
-:local countnew 0
-:local countremoved 0
-:local counttotal [:len $newips]
-:local counterror 0
-
-:if ($counttotal > 0 ) do={
-	:foreach value in=$prdkeys do={
-		:local keyindex [:find $newips [get $value address]]
-		:if ($keyindex > 0) do={
-			:set ($newips->($keyindex)) ""
-		} else={
-			remove $value
-			:set countremoved ($countremoved+1)
-		}
-	}
-	:if ($version >= $minversion ) do={
-		:foreach value in=$newips do={
-			:if ($value != "") do={
-				:do { add list=prod_blocklist address="$value" } on-error { :set counterror ($counterror+1) }
-				:set countnew ($countnew+1)
-			}
-		}
-	} else={
-		:foreach value in=$newips do={
-			:if ($value != "") do={
-				add list=prod_blocklist address="$value"
-				:set countnew ($countnew+1)
-			}
-		}	
-	}
-}
-
-:set newips
-:set duration ([/system clock get time] - $duration)
-
-/system logging enable 0
-:log info "blocklist-REP: finished - enabled info"
-
-:if ($version >= $minversion ) do={
-	:log info "blocklist-REP: finished - $countremoved removed, $countnew new, $counterror errors, in $duration / $counttotal  total"
-} else={
-	:log info "blocklist-REP: finished - $countremoved removed, $countnew new, in $duration / $counttotal  total"
-}
-```
+This project aggregates publicly available threat intelligence feeds. Please respect the terms of use of each source.
