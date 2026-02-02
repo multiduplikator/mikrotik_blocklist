@@ -216,7 +216,7 @@ git gc --auto
 echo "Done!"
 ```
 
-### Generator Script (iprange version)
+### Generator Script (iprange version, approx. 5x faster)
 
 ```sh
 #!/bin/sh
