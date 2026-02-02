@@ -50,7 +50,7 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 - `sh`
 - `sed`
 - `grep`
-- `awk`
+- `gawk` (awk ok, but slower) 
 - `curl`
 - `git` (for publishing)
 
@@ -62,6 +62,8 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 # Optimized: process each source file once, reuse cached ranges
 set -eu
 
+AWK=gawk
+
 WORKDIR="/path/to/blocklist"
 OUTDIR="/path/to/mikrotik_blocklist"
 CACHE="$WORKDIR/.cache"
@@ -70,17 +72,12 @@ cd "$WORKDIR"
 rm -rf -- "$CACHE" *.txt *.rsc 2>/dev/null || true
 mkdir -p "$CACHE"
 
-# Download function - exits on failure
 download() {
     url="$1"; output="$2"; name="$3"
     if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
-        if [ -s "$output" ]; then
-            echo "  + $name"
-        else
-            echo "  ! $name (empty file)"; exit 1
-        fi
+        [ -s "$output" ] && echo "  + $name" || { echo "  ! $name (empty)"; exit 1; }
     else
-        echo "  ! $name (download failed)"; exit 1
+        echo "  ! $name (failed)"; exit 1
     fi
 }
 
@@ -88,119 +85,102 @@ echo "Downloading blocklists..."
 
 download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
          "tor_exits.out_s" "Tor Exit Nodes"
-
 download "https://www.spamhaus.org/drop/drop.txt" \
          "spamhaus_drop.out_s" "Spamhaus DROP"
-
 download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
          "sslbl.out_s" "SSL Blacklist"
-
 download "https://lists.blocklist.de/lists/all.txt" \
          "blocklist_de.out_s" "Blocklist.de"
-
 download "https://cinsscore.com/list/ci-badguys.txt" \
          "cinsarmy.out_l" "CINS Army"
-
 download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
          "feodo.out_s" "Feodo Tracker"
-
 download "https://iplists.firehol.org/files/firehol_level1.netset" \
          "firehol_l1.out_s" "FireHOL L1"
-
 download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
          "ipsum_l1.out_xl" "IPsum L1"
-
 download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
          "ipsum_l3.out_s" "IPsum L3"
 
 echo "All downloads successful."
 echo "Extracting ranges..."
 
-# Extract valid IP ranges from a file (grep + validate combined in one awk)
-# Output: "start_int end_int" pairs
 extract_ranges() {
-    awk '
-    function ip2int(ip,    o) {
-        split(ip, o, ".")
-        return o[1]*16777216 + o[2]*65536 + o[3]*256 + o[4]
+    grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$1" | $AWK '
+    BEGIN {
+        for (i = 0; i <= 32; i++) P[i] = 2^(32-i)
     }
     {
-        while (match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?/)) {
-            addr = substr($0, RSTART, RLENGTH)
-            $0 = substr($0, RSTART + RLENGTH)
+        n = split($0, p, "/")
+        split(p[1], o, ".")
+        if (o[1]>255||o[2]>255||o[3]>255||o[4]>255) next
+        pfx = (n==2) ? p[2]+0 : 32
+        if (pfx<0||pfx>32) next
 
-            n = split(addr, p, "/")
-            ip = p[1]; pfx = (n == 2) ? p[2]+0 : 32
-            split(ip, o, ".")
-            ok = 1
-            for (i = 1; i <= 4; i++) if (o[i]+0 > 255) ok = 0
-            if (pfx < 0 || pfx > 32) ok = 0
-            if (!ok) continue
+        s = o[1]*16777216 + o[2]*65536 + o[3]*256 + o[4]
+        sz = P[pfx]
+        s = int(s/sz)*sz
+        e = s + sz - 1
 
-            s = ip2int(ip)
-            sz = 2^(32 - pfx)
-            s = int(s / sz) * sz
-            e = s + sz - 1
+        if (s <= 16777215) next
+        if (s <= 184549375 && e >= 167772160) next
+        if (s <= 2147483647 && e >= 2130706432) next
+        if (s <= 2887778303 && e >= 2886729728) next
+        if (s <= 3232301055 && e >= 3232235520) next
+        if (e >= 3758096384) next
+        if (pfx==32 && s==879870596) next
+        if (pfx==32 && s==599449625) next
 
-            if (s <= 16777215)                          continue
-            if (s <= 184549375  && e >= 167772160)      continue
-            if (s <= 2147483647 && e >= 2130706432)     continue
-            if (s <= 2887778303 && e >= 2886729728)     continue
-            if (s <= 3232301055 && e >= 3232235520)     continue
-            if (e >= 3758096384)                        continue
-            if (pfx == 32 && s == 879870596)            continue
-            if (pfx == 32 && s == 599449625)            continue
-
-            printf "%.0f %.0f\n", s, e
-        }
-    }' "$1"
+        print s, e
+    }'
 }
 
-# Process each source file once, cache results
 for f in *.out_*; do
-    extract_ranges "$f" > "$CACHE/${f}.ranges"
-    echo "  $f"
+    extract_ranges "$f" > "$CACHE/${f}.ranges" &
 done
+wait
+echo "  Extracted $(ls "$CACHE" | wc -l) files"
 
 echo "Building lists..."
 
-# Merge sorted ranges and emit optimal CIDR
 merge_to_cidr() {
-    sort -n | awk '
-    function int2ip(n) {
-        return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." int(n)%256
+    sort -n | $AWK '
+    BEGIN {
+        for (i=0; i<=32; i++) P[i] = 2^i
     }
-    function emit(s, e,    bits, sz, p) {
+    function ip(n) {
+        return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
+    }
+    function emit(s, e,   b, sz) {
         while (s <= e) {
-            for (bits = 0; bits < 32; bits++) {
-                sz = 2^(bits + 1)
-                if (s % sz != 0 || s + sz - 1 > e) break
+            for (b=0; b<32; b++) {
+                sz = P[b+1]
+                if (s%sz || s+sz-1 > e) break
             }
-            sz = 2^bits; p = 32 - bits
-            print (p == 32) ? int2ip(s) : int2ip(s) "/" p
+            sz = P[b]
+            print (b==0) ? ip(s) : ip(s) "/" (32-b)
             s += sz
         }
     }
-    NR == 1 { cs = $1; ce = $2; next }
-    $1 <= ce + 1 { if ($2 > ce) ce = $2; next }
-    { emit(cs, ce); cs = $1; ce = $2 }
-    END { if (NR > 0) emit(cs, ce); print "240.0.0.0/4" }'
+    NR==1 { cs=$1; ce=$2; next }
+    $1 <= ce+1 { if ($2>ce) ce=$2; next }
+    { emit(cs,ce); cs=$1; ce=$2 }
+    END { if(NR) emit(cs,ce); print "240.0.0.0/4" }'
 }
 
-# Build list from cached ranges
 build_list() {
     base="$1"; shift
-    cat "$@" | merge_to_cidr | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n > "${base}.txt"
+    cat "$@" | merge_to_cidr > "${base}.txt"
 
     count=$(wc -l < "${base}.txt")
     [ "$count" -le 1 ] && { echo "ERROR: No valid IPs for ${base}" >&2; exit 1; }
     echo "  ${base}: ${count} entries"
 
-    awk 'BEGIN { print "/ip firewall address-list" }
+    $AWK 'BEGIN { print "/ip firewall address-list" }
          { printf "add list=new_blocklist address=\"%s\" comment=\"blocklist\"\n", $0 }
         ' "${base}.txt" > "${base}.rsc"
 
-    awk 'BEGIN { print ":global newips [:toarray \"\"]" }
+    $AWK 'BEGIN { print ":global newips [:toarray \"\"]" }
          { printf ":set newips ($newips,\"%s\")\n", $0 }
         ' "${base}.txt" > "blocklist_ga${base#blocklist}.rsc"
 }
@@ -211,10 +191,11 @@ build_list "blocklist_xl" "$CACHE"/*.ranges
 
 rm -rf "$CACHE"
 
-# Copy and publish
 cp -- *.rsc *.txt "$OUTDIR/"
 
 cd "$OUTDIR"
+git fetch origin
+git reset --hard origin/main
 git add -A
 git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
 git push
