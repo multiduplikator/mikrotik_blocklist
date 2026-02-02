@@ -1,6 +1,6 @@
 # MikroTik Blocklist
 
-An aggregated IP blocklist for MikroTik RouterOS firewalls, compiled from multiple threat intelligence sources.
+An aggregated IP blocklist for MikroTik RouterOS firewalls, compiled from multiple threat intelligence sources. Tried and tested on ROS 7.21.2 and Alpine container on ROSE 7.21.2 - latest at the time of writing.
 
 ## Overview
 
