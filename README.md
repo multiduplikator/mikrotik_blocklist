@@ -50,7 +50,7 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 - `sh`
 - `sed`
 - `grep`
-- `gawk` (awk ok, but slower) 
+- `gawk`
 - `curl`
 - `git` (for publishing)
 
@@ -61,8 +61,6 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 # Blocklist aggregator - Alpine Linux (BusyBox only, no Python)
 # Optimized: process each source file once, reuse cached ranges
 set -eu
-
-AWK=gawk
 
 WORKDIR="/path/to/blocklist"
 OUTDIR="/path/to/mikrotik_blocklist"
@@ -105,57 +103,57 @@ download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" 
 echo "All downloads successful."
 echo "Extracting ranges..."
 
-extract_ranges() {
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$1" | $AWK '
-    BEGIN {
-        for (i = 0; i <= 32; i++) P[i] = 2^(32-i)
-    }
-    {
-        n = split($0, p, "/")
-        split(p[1], o, ".")
-        if (o[1]>255||o[2]>255||o[3]>255||o[4]>255) next
-        pfx = (n==2) ? p[2]+0 : 32
-        if (pfx<0||pfx>32) next
+gawk '
+BEGIN {
+    for (i = 0; i <= 32; i++) P[i] = lshift(1, 32-i)
+    cache = "'"$CACHE"'/"
+}
+{
+    line = $0
+    while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?/)) {
+        addr = substr(line, RSTART, RLENGTH)
+        line = substr(line, RSTART + RLENGTH)
 
-        s = o[1]*16777216 + o[2]*65536 + o[3]*256 + o[4]
+        n = split(addr, p, "/")
+        split(p[1], o, ".")
+        if (o[1]>255||o[2]>255||o[3]>255||o[4]>255) continue
+        pfx = (n==2) ? p[2]+0 : 32
+        if (pfx<0||pfx>32) continue
+
+        s = lshift(o[1],24) + lshift(o[2],16) + lshift(o[3],8) + o[4]
         sz = P[pfx]
-        s = int(s/sz)*sz
+        s = and(s, compl(sz-1))
         e = s + sz - 1
 
-        if (s <= 16777215) next
-        if (s <= 184549375 && e >= 167772160) next
-        if (s <= 2147483647 && e >= 2130706432) next
-        if (s <= 2887778303 && e >= 2886729728) next
-        if (s <= 3232301055 && e >= 3232235520) next
-        if (e >= 3758096384) next
-        if (pfx==32 && s==879870596) next
-        if (pfx==32 && s==599449625) next
+        if (s <= 16777215) continue
+        if (s <= 184549375 && e >= 167772160) continue
+        if (s <= 2147483647 && e >= 2130706432) continue
+        if (s <= 2887778303 && e >= 2886729728) continue
+        if (s <= 3232301055 && e >= 3232235520) continue
+        if (e >= 3758096384) continue
+        if (pfx==32 && s==879870596) continue
+        if (pfx==32 && s==599449625) continue
 
-        print s, e
-    }'
+        print s, e > (cache FILENAME ".ranges")
+    }
 }
+' *.out_*
 
-for f in *.out_*; do
-    extract_ranges "$f" > "$CACHE/${f}.ranges" &
-done
-wait
-echo "  Extracted $(ls "$CACHE" | wc -l) files"
+echo "  Processed $(ls *.out_* | wc -l) files"
 
 echo "Building lists..."
 
 merge_to_cidr() {
-    sort -n | $AWK '
-    BEGIN {
-        for (i=0; i<=32; i++) P[i] = 2^i
-    }
+    sort -n | gawk '
+    BEGIN { for (i=0; i<=32; i++) P[i] = lshift(1, i) }
     function ip(n) {
-        return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
+        return and(rshift(n,24),255) "." and(rshift(n,16),255) "." and(rshift(n,8),255) "." and(n,255)
     }
     function emit(s, e,   b, sz) {
         while (s <= e) {
             for (b=0; b<32; b++) {
                 sz = P[b+1]
-                if (s%sz || s+sz-1 > e) break
+                if (and(s,sz-1) || s+sz-1 > e) break
             }
             sz = P[b]
             print (b==0) ? ip(s) : ip(s) "/" (32-b)
@@ -176,18 +174,19 @@ build_list() {
     [ "$count" -le 1 ] && { echo "ERROR: No valid IPs for ${base}" >&2; exit 1; }
     echo "  ${base}: ${count} entries"
 
-    $AWK 'BEGIN { print "/ip firewall address-list" }
+    gawk 'BEGIN { print "/ip firewall address-list" }
          { printf "add list=new_blocklist address=\"%s\" comment=\"blocklist\"\n", $0 }
         ' "${base}.txt" > "${base}.rsc"
 
-    $AWK 'BEGIN { print ":global newips [:toarray \"\"]" }
+    gawk 'BEGIN { print ":global newips [:toarray \"\"]" }
          { printf ":set newips ($newips,\"%s\")\n", $0 }
         ' "${base}.txt" > "blocklist_ga${base#blocklist}.rsc"
 }
 
-build_list "blocklist"    "$CACHE"/*.out_s.ranges
-build_list "blocklist_l"  "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges
-build_list "blocklist_xl" "$CACHE"/*.ranges
+build_list "blocklist"    "$CACHE"/*.out_s.ranges &
+build_list "blocklist_l"  "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges &
+build_list "blocklist_xl" "$CACHE"/*.ranges &
+wait
 
 rm -rf "$CACHE"
 
