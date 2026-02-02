@@ -51,16 +51,19 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 - `sed`
 - `grep`
 - `gawk`
+- `ipgrange` (only for iprange version)
 - `curl`
 - `git` (for publishing)
 
-### Generator Script
+### Generator Script (gawk version)
 
 ```sh
 #!/bin/sh
-# Blocklist aggregator - Alpine Linux (BusyBox only, no Python)
-# Optimized: process each source file once, reuse cached ranges
+# Blocklist aggregator - Alpine Linux (gawk version)
+# Requires: apk add curl git gawk
 set -eu
+
+export LC_ALL=C
 
 WORKDIR="/path/to/blocklist"
 OUTDIR="/path/to/mikrotik_blocklist"
@@ -82,23 +85,29 @@ download() {
 echo "Downloading blocklists..."
 
 download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
-         "tor_exits.out_s" "Tor Exit Nodes"
+         "tor_exits.out_s" "Tor Exit Nodes" &
 download "https://www.spamhaus.org/drop/drop.txt" \
-         "spamhaus_drop.out_s" "Spamhaus DROP"
+         "spamhaus_drop.out_s" "Spamhaus DROP" &
 download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
-         "sslbl.out_s" "SSL Blacklist"
+         "sslbl.out_s" "SSL Blacklist" &
 download "https://lists.blocklist.de/lists/all.txt" \
-         "blocklist_de.out_s" "Blocklist.de"
+         "blocklist_de.out_s" "Blocklist.de" &
 download "https://cinsscore.com/list/ci-badguys.txt" \
-         "cinsarmy.out_l" "CINS Army"
+         "cinsarmy.out_l" "CINS Army" &
 download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
-         "feodo.out_s" "Feodo Tracker"
+         "feodo.out_s" "Feodo Tracker" &
 download "https://iplists.firehol.org/files/firehol_level1.netset" \
-         "firehol_l1.out_s" "FireHOL L1"
+         "firehol_l1.out_s" "FireHOL L1" &
 download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
-         "ipsum_l1.out_xl" "IPsum L1"
+         "ipsum_l1.out_xl" "IPsum L1" &
 download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
-         "ipsum_l3.out_s" "IPsum L3"
+         "ipsum_l3.out_s" "IPsum L3" &
+wait
+
+for f in tor_exits.out_s spamhaus_drop.out_s sslbl.out_s blocklist_de.out_s \
+         cinsarmy.out_l feodo.out_s firehol_l1.out_s ipsum_l1.out_xl ipsum_l3.out_s; do
+    [ -s "$f" ] || { echo "  ! Missing: $f"; exit 1; }
+done
 
 echo "All downloads successful."
 echo "Extracting ranges..."
@@ -134,7 +143,7 @@ BEGIN {
         if (pfx==32 && s==879870596) continue
         if (pfx==32 && s==599449625) continue
 
-        print s, e > (cache FILENAME ".ranges")
+        print s, e >> (cache FILENAME ".ranges")
     }
 }
 ' *.out_*
@@ -143,44 +152,48 @@ echo "  Processed $(ls *.out_* | wc -l) files"
 
 echo "Building lists..."
 
-merge_to_cidr() {
-    sort -n | gawk '
-    BEGIN { for (i=0; i<=32; i++) P[i] = lshift(1, i) }
+build_list() {
+    base="$1"; shift
+    sort -n -S 50% "$@" | gawk -v base="$base" '
+    BEGIN {
+        for (i=0; i<=32; i++) P[i] = lshift(1, i)
+        rsc = base ".rsc"
+        ga = (base == "blocklist") ? "blocklist_ga.rsc" : "blocklist_ga_" substr(base, 11) ".rsc"
+        txt = base ".txt"
+        print "/ip firewall address-list" > rsc
+        print ":global newips [:toarray \"\"]" > ga
+        count = 0
+    }
     function ip(n) {
         return and(rshift(n,24),255) "." and(rshift(n,16),255) "." and(rshift(n,8),255) "." and(n,255)
     }
-    function emit(s, e,   b, sz) {
+    function emit(s, e,   b, sz, addr) {
         while (s <= e) {
             for (b=0; b<32; b++) {
                 sz = P[b+1]
                 if (and(s,sz-1) || s+sz-1 > e) break
             }
             sz = P[b]
-            print (b==0) ? ip(s) : ip(s) "/" (32-b)
+            addr = (b==0) ? ip(s) : ip(s) "/" (32-b)
+            print addr >> txt
+            print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" >> rsc
+            print ":set newips ($newips,\"" addr "\")" >> ga
+            count++
             s += sz
         }
     }
     NR==1 { cs=$1; ce=$2; next }
     $1 <= ce+1 { if ($2>ce) ce=$2; next }
     { emit(cs,ce); cs=$1; ce=$2 }
-    END { if(NR) emit(cs,ce); print "240.0.0.0/4" }'
-}
-
-build_list() {
-    base="$1"; shift
-    cat "$@" | merge_to_cidr > "${base}.txt"
-
-    count=$(wc -l < "${base}.txt")
-    [ "$count" -le 1 ] && { echo "ERROR: No valid IPs for ${base}" >&2; exit 1; }
-    echo "  ${base}: ${count} entries"
-
-    gawk 'BEGIN { print "/ip firewall address-list" }
-         { printf "add list=new_blocklist address=\"%s\" comment=\"blocklist\"\n", $0 }
-        ' "${base}.txt" > "${base}.rsc"
-
-    gawk 'BEGIN { print ":global newips [:toarray \"\"]" }
-         { printf ":set newips ($newips,\"%s\")\n", $0 }
-        ' "${base}.txt" > "blocklist_ga${base#blocklist}.rsc"
+    END {
+        if(NR) emit(cs,ce)
+        addr = "240.0.0.0/4"
+        print addr >> txt
+        print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" >> rsc
+        print ":set newips ($newips,\"" addr "\")" >> ga
+        count++
+        print "  " base ": " count " entries" > "/dev/stderr"
+    }'
 }
 
 build_list "blocklist"    "$CACHE"/*.out_s.ranges &
@@ -189,6 +202,122 @@ build_list "blocklist_xl" "$CACHE"/*.ranges &
 wait
 
 rm -rf "$CACHE"
+
+cp -- *.rsc *.txt "$OUTDIR/"
+
+cd "$OUTDIR"
+git fetch origin
+git reset --hard origin/main
+git add -A
+git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
+git push
+git gc --auto
+
+echo "Done!"
+```
+
+### Generator Script (iprange version)
+
+```sh
+#!/bin/sh
+# Blocklist aggregator - Alpine Linux (iprange version)
+# Requires: apk add curl git gawk iprange
+#   To install iprange from edge/testing:
+#     echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+#     apk update
+#     apk add iprange
+set -eu
+
+export LC_ALL=C
+
+WORKDIR="/path/to/blocklist"
+OUTDIR="/path/to/mikrotik_blocklist"
+EXCLUDE="$WORKDIR/.exclude"
+
+cd "$WORKDIR"
+rm -f -- *.out_* *.txt *.rsc 2>/dev/null || true
+
+# Create exclusion file: reserved ranges + whitelist
+cat > "$EXCLUDE" << 'EOF'
+0.0.0.0/8
+10.0.0.0/8
+127.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
+224.0.0.0/3
+52.113.194.132
+35.186.224.25
+EOF
+
+download() {
+    url="$1"; output="$2"; name="$3"
+    if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
+        [ -s "$output" ] && echo "  + $name" || { echo "  ! $name (empty)"; exit 1; }
+    else
+        echo "  ! $name (failed)"; exit 1
+    fi
+}
+
+echo "Downloading blocklists..."
+
+download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
+         "tor_exits.out_s" "Tor Exit Nodes" &
+download "https://www.spamhaus.org/drop/drop.txt" \
+         "spamhaus_drop.out_s" "Spamhaus DROP" &
+download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
+         "sslbl.out_s" "SSL Blacklist" &
+download "https://lists.blocklist.de/lists/all.txt" \
+         "blocklist_de.out_s" "Blocklist.de" &
+download "https://cinsscore.com/list/ci-badguys.txt" \
+         "cinsarmy.out_l" "CINS Army" &
+download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
+         "feodo.out_s" "Feodo Tracker" &
+download "https://iplists.firehol.org/files/firehol_level1.netset" \
+         "firehol_l1.out_s" "FireHOL L1" &
+download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
+         "ipsum_l1.out_xl" "IPsum L1" &
+download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
+         "ipsum_l3.out_s" "IPsum L3" &
+wait
+
+for f in tor_exits.out_s spamhaus_drop.out_s sslbl.out_s blocklist_de.out_s \
+         cinsarmy.out_l feodo.out_s firehol_l1.out_s ipsum_l1.out_xl ipsum_l3.out_s; do
+    [ -s "$f" ] || { echo "  ! Missing: $f"; exit 1; }
+done
+
+echo "All downloads successful."
+echo "Building lists..."
+
+build_list() {
+    base="$1"; shift
+
+    {
+        grep -hoE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$@" \
+            | iprange - --optimize --except "$EXCLUDE"
+        echo "240.0.0.0/4"
+    } | gawk -v base="$base" '
+    BEGIN {
+        rsc = base ".rsc"
+        ga = (base == "blocklist") ? "blocklist_ga.rsc" : "blocklist_ga_" substr(base, 11) ".rsc"
+        txt = base ".txt"
+        print "/ip firewall address-list" > rsc
+        print ":global newips [:toarray \"\"]" > ga
+    }
+    {
+        print >> txt
+        print "add list=new_blocklist address=\"" $0 "\" comment=\"blocklist\"" >> rsc
+        print ":set newips ($newips,\"" $0 "\")" >> ga
+        count++
+    }
+    END { print "  " base ": " count " entries" > "/dev/stderr" }'
+}
+
+build_list "blocklist"    *.out_s &
+build_list "blocklist_l"  *.out_s *.out_l &
+build_list "blocklist_xl" *.out_* &
+wait
+
+rm -f "$EXCLUDE"
 
 cp -- *.rsc *.txt "$OUTDIR/"
 
