@@ -76,7 +76,11 @@ mkdir -p "$CACHE"
 download() {
     url="$1"; output="$2"; name="$3"
     if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
-        [ -s "$output" ] && echo "  + $name" || { echo "  ! $name (empty)"; exit 1; }
+        if [ -s "$output" ]; then
+            echo "  + $name"
+        else
+            echo "  ! $name (empty)"; exit 1
+        fi
     else
         echo "  ! $name (failed)"; exit 1
     fi
@@ -146,9 +150,9 @@ BEGIN {
         print s, e >> (cache FILENAME ".ranges")
     }
 }
-' *.out_*
+' ./*.out_*
 
-echo "  Processed $(ls *.out_* | wc -l) files"
+echo "  Processed $(find . -name '*.out_*' | wc -l) files"
 
 echo "Building lists..."
 
@@ -252,7 +256,11 @@ EOF
 download() {
     url="$1"; output="$2"; name="$3"
     if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
-        [ -s "$output" ] && echo "  + $name" || { echo "  ! $name (empty)"; exit 1; }
+        if [ -s "$output" ]; then
+            echo "  + $name"
+        else
+            echo "  ! $name (empty)"; exit 1
+        fi
     else
         echo "  ! $name (failed)"; exit 1
     fi
@@ -312,9 +320,9 @@ build_list() {
     END { print "  " base ": " count " entries" > "/dev/stderr" }'
 }
 
-build_list "blocklist"    *.out_s &
-build_list "blocklist_l"  *.out_s *.out_l &
-build_list "blocklist_xl" *.out_* &
+build_list "blocklist"    ./*.out_s &
+build_list "blocklist_l"  ./*.out_s ./*.out_l &
+build_list "blocklist_xl" ./*.out_* &
 wait
 
 rm -f "$EXCLUDE"
