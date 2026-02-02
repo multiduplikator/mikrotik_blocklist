@@ -62,12 +62,9 @@ The blocklist is generated using a sh script for IP extraction, validation, and 
 # Optimized: process each source file once, reuse cached ranges
 set -eu
 
-WORKDIR="/root/blocklist"
-OUTDIR="/root/mikrotik_blocklist"
+WORKDIR="/path/to/blocklist"
+OUTDIR="/path/to/mikrotik_blocklist"
 CACHE="$WORKDIR/.cache"
-
-export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
-ssh-add -l 2>/dev/null | grep -q "root@alpine" || ssh-add /root/.ssh/blocklist
 
 cd "$WORKDIR"
 rm -rf -- "$CACHE" *.txt *.rsc 2>/dev/null || true
