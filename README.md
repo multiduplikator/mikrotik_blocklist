@@ -159,12 +159,14 @@ build_list() {
     base="$1"; shift
     outbase="$OUTDIR/$base"
 
-    sort -n -S 50% "$@" | gawk -v base="$base" -v outbase="$outbase" '
+    sort -n -S 50% "$@" | gawk -v base="$base" -v outbase="$outbase" -v outdir="$OUTDIR" '
     BEGIN {
         for (i=0; i<=32; i++) P[i] = lshift(1, i)
         rsc = outbase ".rsc"
-        ga = (base == "blocklist") ? outbase "_ga.rsc" : outbase "_ga_" substr(base, 11) ".rsc"
+        suffix = (base == "blocklist") ? "" : "_" substr(base, 11)
+        ga = outdir "/blocklist_ga" suffix ".rsc"
         txt = outbase ".txt"
+        printf "" > txt
         print "/ip firewall address-list" > rsc
         print ":global newips [:toarray \"\"]" > ga
         count = 0
@@ -215,7 +217,7 @@ git gc --auto
 echo "Done!"
 ```
 
-### Generator Script (iprange version, approx. 5-10x faster)
+### Generator Script (iprange version, approx. 5-10x faster, but edge/testing dependency)
 
 ```sh
 #!/bin/sh
@@ -300,11 +302,13 @@ build_list() {
         grep -hoE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$@" \
             | iprange - --optimize --except "$EXCLUDE"
         echo "240.0.0.0/4"
-    } | gawk -v base="$base" -v outbase="$outbase" '
+    } | gawk -v base="$base" -v outbase="$outbase" -v outdir="$OUTDIR" '
     BEGIN {
         rsc = outbase ".rsc"
-        ga = (base == "blocklist") ? outbase "_ga.rsc" : outbase "_ga_" substr(base, 11) ".rsc"
+        suffix = (base == "blocklist") ? "" : "_" substr(base, 11)
+        ga = outdir "/blocklist_ga" suffix ".rsc"
         txt = outbase ".txt"
+        printf "" > txt
         print "/ip firewall address-list" > rsc
         print ":global newips [:toarray \"\"]" > ga
     }
