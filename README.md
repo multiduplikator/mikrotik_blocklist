@@ -65,13 +65,14 @@ set -eu
 
 export LC_ALL=C
 
-WORKDIR="/path/to/blocklist"
 OUTDIR="/path/to/mikrotik_blocklist"
-CACHE="$WORKDIR/.cache"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-cd "$WORKDIR"
-rm -rf -- "$CACHE" *.txt *.rsc 2>/dev/null || true
+CACHE="$TMPDIR/.cache"
 mkdir -p "$CACHE"
+
+cd "$TMPDIR"
 
 download() {
     url="$1"; output="$2"; name="$3"
@@ -158,12 +159,14 @@ echo "Building lists..."
 
 build_list() {
     base="$1"; shift
-    sort -n -S 50% "$@" | gawk -v base="$base" '
+    outbase="$OUTDIR/$base"
+
+    sort -n -S 50% "$@" | gawk -v base="$base" -v outbase="$outbase" '
     BEGIN {
         for (i=0; i<=32; i++) P[i] = lshift(1, i)
-        rsc = base ".rsc"
-        ga = (base == "blocklist") ? "blocklist_ga.rsc" : "blocklist_ga_" substr(base, 11) ".rsc"
-        txt = base ".txt"
+        rsc = outbase ".rsc"
+        ga = (base == "blocklist") ? outbase "_ga.rsc" : outbase "_ga_" substr(base, 11) ".rsc"
+        txt = outbase ".txt"
         print "/ip firewall address-list" > rsc
         print ":global newips [:toarray \"\"]" > ga
         count = 0
@@ -205,13 +208,7 @@ build_list "blocklist_l"  "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges &
 build_list "blocklist_xl" "$CACHE"/*.ranges &
 wait
 
-rm -rf "$CACHE"
-
-cp -- *.rsc *.txt "$OUTDIR/"
-
 cd "$OUTDIR"
-git fetch origin
-git reset --hard origin/main
 git add -A
 git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
 git push
@@ -234,12 +231,13 @@ set -eu
 
 export LC_ALL=C
 
-WORKDIR="/path/to/blocklist"
 OUTDIR="/path/to/mikrotik_blocklist"
-EXCLUDE="$WORKDIR/.exclude"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-cd "$WORKDIR"
-rm -f -- *.out_* *.txt *.rsc 2>/dev/null || true
+EXCLUDE="$TMPDIR/.exclude"
+
+cd "$TMPDIR"
 
 # Create exclusion file: reserved ranges + whitelist
 cat > "$EXCLUDE" << 'EOF'
@@ -298,16 +296,17 @@ echo "Building lists..."
 
 build_list() {
     base="$1"; shift
+    outbase="$OUTDIR/$base"
 
     {
         grep -hoE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$@" \
             | iprange - --optimize --except "$EXCLUDE"
         echo "240.0.0.0/4"
-    } | gawk -v base="$base" '
+    } | gawk -v base="$base" -v outbase="$outbase" '
     BEGIN {
-        rsc = base ".rsc"
-        ga = (base == "blocklist") ? "blocklist_ga.rsc" : "blocklist_ga_" substr(base, 11) ".rsc"
-        txt = base ".txt"
+        rsc = outbase ".rsc"
+        ga = (base == "blocklist") ? outbase "_ga.rsc" : outbase "_ga_" substr(base, 11) ".rsc"
+        txt = outbase ".txt"
         print "/ip firewall address-list" > rsc
         print ":global newips [:toarray \"\"]" > ga
     }
@@ -325,13 +324,7 @@ build_list "blocklist_l"  ./*.out_s ./*.out_l &
 build_list "blocklist_xl" ./*.out_* &
 wait
 
-rm -f "$EXCLUDE"
-
-cp -- *.rsc *.txt "$OUTDIR/"
-
 cd "$OUTDIR"
-git fetch origin
-git reset --hard origin/main
 git add -A
 git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
 git push
