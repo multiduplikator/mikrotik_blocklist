@@ -153,8 +153,6 @@ BEGIN {
 }
 ' ./*.out_*
 
-echo "  Processed $(find . -name '*.out_*' | wc -l) files"
-
 echo "Building lists..."
 
 build_list() {
