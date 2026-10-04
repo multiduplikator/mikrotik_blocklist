@@ -5648,7 +5648,6 @@
 :set newips ($newips,"85.114.120.0/21")
 :set newips ($newips,"85.119.82.142")
 :set newips ($newips,"85.121.4.0/24")
-:set newips ($newips,"85.122.129.0/24")
 :set newips ($newips,"85.130.237.235")
 :set newips ($newips,"85.133.180.218")
 :set newips ($newips,"85.133.193.72")
