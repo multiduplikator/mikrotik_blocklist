@@ -1,0 +1,132 @@
+name: update_blocklist
+
+on:
+  schedule:
+    # Running every 3h
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: update_blocklist-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Clone Project
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gawk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gawk
+
+      - name: Generate Blocklists
+        run: |
+          chmod +x ./generate.sh
+          ./generate.sh
+
+      - name: Validate Generated Lists
+        run: |
+          set -euo pipefail
+          MAIN_FILES=(
+            blocklist.rsc blocklist.txt blocklist_ga.rsc
+            blocklist_l.rsc blocklist_l.txt blocklist_ga_l.rsc
+            blocklist_xl.rsc blocklist_xl.txt blocklist_ga_xl.rsc
+          )
+          for f in "${MAIN_FILES[@]}"; do
+            test -s "$f" || { echo "::error::$f is missing or empty"; exit 1; }
+          done
+
+          # Shape checks: only expected RouterOS commands appear.
+          for f in blocklist.rsc blocklist_l.rsc blocklist_xl.rsc; do
+            head -n1 "$f" | grep -qxF "/ip firewall address-list" \
+              || { echo "::error::$f header wrong"; exit 1; }
+            if tail -n +2 "$f" | grep -vE '^add list=new_blocklist address="[0-9./]+" comment="blocklist"$' | head -1 | grep -q .; then
+              echo "::error::$f contains unexpected line(s)"; exit 1
+            fi
+          done
+          for f in blocklist_ga.rsc blocklist_ga_l.rsc blocklist_ga_xl.rsc; do
+            head -n1 "$f" | grep -qxF ':global newips [:toarray ""]' \
+              || { echo "::error::$f header wrong"; exit 1; }
+            if tail -n +2 "$f" | grep -vE '^:set newips \(\$newips,"[0-9./]+"\)$' | head -1 | grep -q .; then
+              echo "::error::$f contains unexpected line(s)"; exit 1
+            fi
+          done
+
+          # Absolute bounds sanity check.
+          std=$(wc -l < blocklist.txt)
+          lg=$(wc -l < blocklist_l.txt)
+          xl=$(wc -l < blocklist_xl.txt)
+          echo "Entries: standard=$std large=$lg xl=$xl"
+          [ "$std" -ge 8000  ] && [ "$std" -le 60000 ]  || { echo "::error::standard out of range ($std)"; exit 1; }
+          [ "$lg"  -ge 15000 ] && [ "$lg"  -le 80000 ]  || { echo "::error::large out of range ($lg)"; exit 1; }
+          [ "$xl"  -ge 40000 ] && [ "$xl"  -le 150000 ] || { echo "::error::xl out of range ($xl)"; exit 1; }
+
+          # Delta regression: warn (or fail) on abrupt changes vs previous commit.
+          delta_check() {
+            local f="$1" thresh="$2"
+            local new; new=$(wc -l < "$f")
+            if git cat-file -e HEAD:"$f" 2>/dev/null; then
+              local old; old=$(git show "HEAD:$f" | wc -l)
+              if [ "$old" -gt 0 ]; then
+                local pct
+                pct=$(awk -v o="$old" -v n="$new" 'BEGIN{d=(n-o)/o*100; if(d<0)d=-d; printf "%d", d+0.5}')
+                echo "  $f: $old -> $new (delta ${pct}%)"
+                if [ "$pct" -gt "$thresh" ]; then
+                  echo "::error::$f delta ${pct}% exceeds ${thresh}% threshold"; exit 1
+                fi
+              fi
+            fi
+          }
+          delta_check blocklist.txt 30
+          delta_check blocklist_l.txt 30
+          delta_check blocklist_xl.txt 30
+
+          # Persist counts for the summary step.
+          {
+            echo "STD=$std"
+            echo "LG=$lg"
+            echo "XL=$xl"
+          } >> "$GITHUB_ENV"
+
+      - name: Write Step Summary
+        if: always()
+        run: |
+          {
+            echo "# Blocklist regeneration"
+            echo ""
+            echo "| List | Entries |"
+            echo "|---|---|"
+            echo "| Standard | ${STD:-?} |"
+            echo "| Large | ${LG:-?} |"
+            echo "| Extra Large | ${XL:-?} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit Generated Files
+        run: |
+          set -euo pipefail
+          NOW=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          git config --local user.email "noreply@github.actions.bot"
+          git config --local user.name "GitHub Actions"
+          git add blocklist.rsc blocklist.txt blocklist_ga.rsc \
+                  blocklist_l.rsc blocklist_l.txt blocklist_ga_l.rsc \
+                  blocklist_xl.rsc blocklist_xl.txt blocklist_ga_xl.rsc
+          git status
+          if ! git diff --cached --quiet; then
+            git commit -m "Regenerate blocklists - $NOW"
+          fi
+
+      - name: Push Changes
+        uses: ad-m/github-push-action@881a6320fdb16eb5318c5054f31c218aec2b324c # v1.3.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main

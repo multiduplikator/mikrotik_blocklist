@@ -6,334 +6,65 @@ An aggregated IP blocklist for MikroTik RouterOS firewalls, compiled from multip
 
 This project provides pre-aggregated blocklists optimized for MikroTik routers. By using CIDR prefix aggregation, we minimize the number of address-list entries while maintaining comprehensive coverage — improving router performance and reducing memory usage.
 
-**Update frequency:** Every 3 hours
+**Update frequency:** Every 3 hours (automated via GitHub Actions)
 
 ## Available Lists
 
 | List | File | Entries | Sources |
 |------|------|---------|---------|
-| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~20k | Core threat feeds |
-| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~25k | Core + CINS Army |
-| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~68k | All sources including IPsum L1 |
+| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~30k | Core threat feeds |
+| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~40k | Core + CINS Army |
+| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~110k | All threat sources including IPsum L1 |
 
 ## Sources
 
 | Source | Description | Standard | Large | XL |
 |--------|-------------|:--------:|:-----:|:--:|
-| [Tor Exit Nodes](https://github.com/SecOps-Institute/Tor-IP-Addresses) | Tor exit node IPs | ✓ | ✓ | ✓ |
-| [Spamhaus DROP](https://www.spamhaus.org/drop/) | "Don't Route Or Peer" list | ✓ | ✓ | ✓ |
-| [SSL Blacklist](https://sslbl.abuse.ch/) | Botnet C&C servers | ✓ | ✓ | ✓ |
-| [Blocklist.de](https://lists.blocklist.de/) | Fail2ban reported IPs | ✓ | ✓ | ✓ |
+| [Spamhaus DROP](https://www.spamhaus.org/drop/) | Hijacked / criminal netblocks ("Don't Route Or Peer") | ✓ | ✓ | ✓ |
+| [Spamhaus EDROP](https://www.spamhaus.org/drop/) | Extended DROP (suballocations) | ✓ | ✓ | ✓ |
+| [SSL Blacklist](https://sslbl.abuse.ch/) | IPs hosting known malicious TLS certs | ✓ | ✓ | ✓ |
 | [Feodo Tracker](https://feodotracker.abuse.ch/) | Banking trojan C&C servers | ✓ | ✓ | ✓ |
-| [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated threat intelligence | ✓ | ✓ | ✓ |
-| [IPsum Level 3](https://github.com/stamparm/ipsum) | High-confidence threat IPs (3+ hits) | ✓ | ✓ | ✓ |
-| [CINS Army](https://cinsscore.com/) | Collective Intelligence Network Security | | ✓ | ✓ |
-| [IPsum Level 1](https://github.com/stamparm/ipsum) | Broader threat IPs (1+ hits) | | | ✓ |
+| [ThreatFox](https://threatfox.abuse.ch/) | Active malware campaign IOCs (IP:port export) | ✓ | ✓ | ✓ |
+| [DShield](https://www.dshield.org/) | SANS ISC top attackers (startIP-endIP-netmask format) | ✓ | ✓ | ✓ |
+| [Blocklist.de](https://lists.blocklist.de/) | Fail2ban-reported IPs across participating servers | ✓ | ✓ | ✓ |
+| [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated high-confidence threat intelligence | ✓ | ✓ | ✓ |
+| [IPsum Level 3](https://github.com/stamparm/ipsum) | High-confidence threat IPs (3+ list hits) | ✓ | ✓ | ✓ |
+| [CINS Army](https://cinsscore.com/) | Sentinel IPS community feed | | ✓ | ✓ |
+| [IPsum Level 1](https://github.com/stamparm/ipsum) | Broader threat IPs (1+ list hits) | | | ✓ |
 
 ## Filtered Addresses
 
-The following are automatically excluded:
+The following are automatically excluded from feed input:
+
 - Private ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- CGNAT: `100.64.0.0/10` (RFC 6598)
 - Loopback: `127.0.0.0/8`
-- Multicast: `224.0.0.0/4`
-- Reserved: `240.0.0.0/4` (added to blocklist), `0.0.0.0/8`
+- Link-local: `169.254.0.0/16` (RFC 3927)
+- Multicast + reserved: `224.0.0.0/3` (covers `224.0.0.0/4` multicast and `240.0.0.0/4` IANA-reserved)
+- Zero-network: `0.0.0.0/8`
 - Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25` (Microsoft Teams)
 
 ---
 
 ## Blocklist Generation
 
-The blocklist is generated using a sh script for IP extraction, validation, and CIDR aggregation.
+The generator lives in [`generate.sh`](generate.sh) and runs under GitHub Actions every 3 hours via [`.github/workflows/update_blocklist.yml`](.github/workflows/update_blocklist.yml). Feed URLs, tier assignments, timeouts, retry counts, and the soft-fail threshold are all hoisted to constants at the top of `generate.sh` — edit there.
 
-### Dependencies
+**Dependencies:** `sh`, `sed`, `grep`, `gawk`, `curl`. All present by default on `ubuntu-latest` GitHub runners.
 
-- `sh`
-- `sed`
-- `grep`
-- `gawk`
-- `ipgrange` (only for iprange version)
-- `curl`
-- `git` (for publishing)
+**Key behaviors:**
 
-### Generator Script (gawk version)
+- Per-feed HTTP retries with a polite `User-Agent` (`curl --retry 3 --retry-delay 5 --retry-connrefused --retry-all-errors`).
+- Parallel downloads.
+- Soft-fail: tolerates up to `MAX_FAILED_FEEDS` (2) missing/empty feeds before aborting.
+- **DShield preprocess** — DShield ships `startIP<TAB>endIP<TAB>netmask` per row; the generic regex extractor would treat only the two edge IPs as /32s and miss everything between. A dedicated preprocess step converts to CIDR, with a **format-drift guard** that drops the feed if <50% of rows survive (protects against a silent ~99% coverage loss if DShield changes format).
+- **Reserved-range filter** removes RFC 1918/6598/3927 space, loopback, multicast, and IANA-reserved from feed input at extract time (see [Filtered Addresses](#filtered-addresses) above).
+- Every tier must produce ranges — if any tier is empty, generation aborts loudly so CI surfaces the outage rather than shipping yesterday's committed files.
+- **Delta regression check** in CI fails the run if any tier moves >30% vs the previous commit.
 
-```sh
-#!/bin/sh
-# Blocklist aggregator - Alpine Linux (gawk version)
-# Requires: apk add curl git gawk
-set -eu
+### Credits
 
-export LC_ALL=C
-
-OUTDIR="/path/to/mikrotik_blocklist"
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-
-CACHE="$TMPDIR/.cache"
-mkdir -p "$CACHE"
-
-cd "$TMPDIR"
-
-download() {
-    url="$1"; output="$2"; name="$3"
-    if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
-        if [ -s "$output" ]; then
-            echo "  + $name"
-        else
-            echo "  ! $name (empty)"; exit 1
-        fi
-    else
-        echo "  ! $name (failed)"; exit 1
-    fi
-}
-
-echo "Downloading blocklists..."
-
-download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
-         "tor_exits.out_s" "Tor Exit Nodes" &
-download "https://www.spamhaus.org/drop/drop.txt" \
-         "spamhaus_drop.out_s" "Spamhaus DROP" &
-download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
-         "sslbl.out_s" "SSL Blacklist" &
-download "https://lists.blocklist.de/lists/all.txt" \
-         "blocklist_de.out_s" "Blocklist.de" &
-download "https://cinsscore.com/list/ci-badguys.txt" \
-         "cinsarmy.out_l" "CINS Army" &
-download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
-         "feodo.out_s" "Feodo Tracker" &
-download "https://iplists.firehol.org/files/firehol_level1.netset" \
-         "firehol_l1.out_s" "FireHOL L1" &
-download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
-         "ipsum_l1.out_xl" "IPsum L1" &
-download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
-         "ipsum_l3.out_s" "IPsum L3" &
-wait
-
-for f in tor_exits.out_s spamhaus_drop.out_s sslbl.out_s blocklist_de.out_s \
-         cinsarmy.out_l feodo.out_s firehol_l1.out_s ipsum_l1.out_xl ipsum_l3.out_s; do
-    [ -s "$f" ] || { echo "  ! Missing: $f"; exit 1; }
-done
-
-echo "All downloads successful."
-echo "Extracting ranges..."
-
-gawk '
-BEGIN {
-    for (i = 0; i <= 32; i++) P[i] = lshift(1, 32-i)
-    cache = "'"$CACHE"'/"
-}
-{
-    line = $0
-    while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?/)) {
-        addr = substr(line, RSTART, RLENGTH)
-        line = substr(line, RSTART + RLENGTH)
-
-        n = split(addr, p, "/")
-        split(p[1], o, ".")
-        if (o[1]>255||o[2]>255||o[3]>255||o[4]>255) continue
-        pfx = (n==2) ? p[2]+0 : 32
-        if (pfx<0||pfx>32) continue
-
-        s = lshift(o[1],24) + lshift(o[2],16) + lshift(o[3],8) + o[4]
-        sz = P[pfx]
-        s = and(s, compl(sz-1))
-        e = s + sz - 1
-
-        if (s <= 16777215) continue
-        if (s <= 184549375 && e >= 167772160) continue
-        if (s <= 2147483647 && e >= 2130706432) continue
-        if (s <= 2887778303 && e >= 2886729728) continue
-        if (s <= 3232301055 && e >= 3232235520) continue
-        if (e >= 3758096384) continue
-        if (pfx==32 && s==879870596) continue
-        if (pfx==32 && s==599449625) continue
-
-        print s, e >> (cache FILENAME ".ranges")
-    }
-}
-' ./*.out_*
-
-echo "Building lists..."
-
-build_list() {
-    base="$1"; shift
-    outbase="$OUTDIR/$base"
-
-    sort -n -S 50% "$@" | gawk -v base="$base" -v outbase="$outbase" -v outdir="$OUTDIR" '
-    BEGIN {
-        for (i=0; i<=32; i++) P[i] = lshift(1, i)
-        rsc = outbase ".rsc"
-        suffix = (base == "blocklist") ? "" : "_" substr(base, 11)
-        ga = outdir "/blocklist_ga" suffix ".rsc"
-        txt = outbase ".txt"
-        printf "" > txt
-        print "/ip firewall address-list" > rsc
-        print ":global newips [:toarray \"\"]" > ga
-        count = 0
-    }
-    function ip(n) {
-        return and(rshift(n,24),255) "." and(rshift(n,16),255) "." and(rshift(n,8),255) "." and(n,255)
-    }
-    function emit(s, e,   b, sz, addr) {
-        while (s <= e) {
-            for (b=0; b<32; b++) {
-                sz = P[b+1]
-                if (and(s,sz-1) || s+sz-1 > e) break
-            }
-            sz = P[b]
-            addr = (b==0) ? ip(s) : ip(s) "/" (32-b)
-            print addr >> txt
-            print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" >> rsc
-            print ":set newips ($newips,\"" addr "\")" >> ga
-            count++
-            s += sz
-        }
-    }
-    NR==1 { cs=$1; ce=$2; next }
-    $1 <= ce+1 { if ($2>ce) ce=$2; next }
-    { emit(cs,ce); cs=$1; ce=$2 }
-    END {
-        if(NR) emit(cs,ce)
-        addr = "240.0.0.0/4"
-        print addr >> txt
-        print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" >> rsc
-        print ":set newips ($newips,\"" addr "\")" >> ga
-        count++
-        print "  " base ": " count " entries" > "/dev/stderr"
-    }'
-}
-
-build_list "blocklist"    "$CACHE"/*.out_s.ranges &
-build_list "blocklist_l"  "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges &
-build_list "blocklist_xl" "$CACHE"/*.ranges &
-wait
-
-cd "$OUTDIR"
-git add -A
-git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
-git push
-git gc --auto
-
-echo "Done!"
-```
-
-### Generator Script (iprange version, approx. 5-10x faster, but edge/testing dependency)
-
-```sh
-#!/bin/sh
-# Blocklist aggregator - Alpine Linux (iprange version)
-# Requires: apk add curl git gawk iprange
-#   To install iprange from edge/testing:
-#     echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
-#     apk update
-#     apk add iprange
-set -eu
-
-export LC_ALL=C
-
-OUTDIR="/path/to/mikrotik_blocklist"
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-
-EXCLUDE="$TMPDIR/.exclude"
-
-cd "$TMPDIR"
-
-# Create exclusion file: reserved ranges + whitelist
-cat > "$EXCLUDE" << 'EOF'
-0.0.0.0/8
-10.0.0.0/8
-127.0.0.0/8
-172.16.0.0/12
-192.168.0.0/16
-224.0.0.0/3
-52.113.194.132
-35.186.224.25
-EOF
-
-download() {
-    url="$1"; output="$2"; name="$3"
-    if curl -sfL --connect-timeout 30 --max-time 120 "$url" -o "$output" 2>/dev/null; then
-        if [ -s "$output" ]; then
-            echo "  + $name"
-        else
-            echo "  ! $name (empty)"; exit 1
-        fi
-    else
-        echo "  ! $name (failed)"; exit 1
-    fi
-}
-
-echo "Downloading blocklists..."
-
-download "https://raw.githubusercontent.com/SecOps-Institute/Tor-IP-Addresses/master/tor-exit-nodes.lst" \
-         "tor_exits.out_s" "Tor Exit Nodes" &
-download "https://www.spamhaus.org/drop/drop.txt" \
-         "spamhaus_drop.out_s" "Spamhaus DROP" &
-download "https://sslbl.abuse.ch/blacklist/sslipblacklist.txt" \
-         "sslbl.out_s" "SSL Blacklist" &
-download "https://lists.blocklist.de/lists/all.txt" \
-         "blocklist_de.out_s" "Blocklist.de" &
-download "https://cinsscore.com/list/ci-badguys.txt" \
-         "cinsarmy.out_l" "CINS Army" &
-download "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" \
-         "feodo.out_s" "Feodo Tracker" &
-download "https://iplists.firehol.org/files/firehol_level1.netset" \
-         "firehol_l1.out_s" "FireHOL L1" &
-download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/1.txt" \
-         "ipsum_l1.out_xl" "IPsum L1" &
-download "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" \
-         "ipsum_l3.out_s" "IPsum L3" &
-wait
-
-for f in tor_exits.out_s spamhaus_drop.out_s sslbl.out_s blocklist_de.out_s \
-         cinsarmy.out_l feodo.out_s firehol_l1.out_s ipsum_l1.out_xl ipsum_l3.out_s; do
-    [ -s "$f" ] || { echo "  ! Missing: $f"; exit 1; }
-done
-
-echo "All downloads successful."
-echo "Building lists..."
-
-build_list() {
-    base="$1"; shift
-    outbase="$OUTDIR/$base"
-
-    {
-        grep -hoE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$@" \
-            | iprange - --optimize --except "$EXCLUDE"
-        echo "240.0.0.0/4"
-    } | gawk -v base="$base" -v outbase="$outbase" -v outdir="$OUTDIR" '
-    BEGIN {
-        rsc = outbase ".rsc"
-        suffix = (base == "blocklist") ? "" : "_" substr(base, 11)
-        ga = outdir "/blocklist_ga" suffix ".rsc"
-        txt = outbase ".txt"
-        printf "" > txt
-        print "/ip firewall address-list" > rsc
-        print ":global newips [:toarray \"\"]" > ga
-    }
-    {
-        print >> txt
-        print "add list=new_blocklist address=\"" $0 "\" comment=\"blocklist\"" >> rsc
-        print ":set newips ($newips,\"" $0 "\")" >> ga
-        count++
-    }
-    END { print "  " base ": " count " entries" > "/dev/stderr" }'
-}
-
-build_list "blocklist"    ./*.out_s &
-build_list "blocklist_l"  ./*.out_s ./*.out_l &
-build_list "blocklist_xl" ./*.out_* &
-wait
-
-cd "$OUTDIR"
-git add -A
-git commit -m "Autoupdated $(date +%Y-%m-%d)" || echo "No changes to commit"
-git push
-git gc --auto
-
-echo "Done!"
-```
+The generator script and the GitHub Actions pipeline are based on the work in the [Davie3/mikrotik_blocklist](https://github.com/Davie3/mikrotik_blocklist) fork, which added the Spamhaus EDROP, DShield, and ThreatFox feeds, the DShield CIDR preprocess with format-drift guard, the broader reserved-range filter, and the self-hosted CI pipeline. This repository adopts those changes (with the Tor-exit list omitted, as its upstream feed is no longer maintained) and repoints the generator and router download URLs to this repository.
 
 ---
 
@@ -396,7 +127,7 @@ This script performs differential updates — only adding new entries and removi
 :foreach entryId in=$prdkeys do={
     :local addr [get $entryId address]
     :local keyindex [:find $newips $addr]
-    
+
     # Check for nil (not found) - fixes index 0 bug
     :if ([:typeof $keyindex] != "nil") do={
         # EXISTS in new list - keep it, blank out to skip later
@@ -451,5 +182,3 @@ This script performs differential updates — only adding new entries and removi
 ## License
 
 This project aggregates publicly available threat intelligence feeds. Please respect the terms of use of each source.
-
-
