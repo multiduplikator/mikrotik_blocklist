@@ -37,6 +37,11 @@ RETRY_PASS_DELAY=60         # pause before a second pass over failed feeds
 MAX_DELTA_PCT=30            # max change in entries vs the current lists
 MIN_PREFIX_LEN=10           # no entry may be wider than this (e.g. a /8)
 
+# Never block these, even if a feed lists them or a range containing them.
+# Space-separated IPs or CIDRs (/16 to /32). Wider ranges are cut into the
+# smallest set of CIDR blocks that leaves these addresses out.
+WHITELIST="52.113.194.132 35.186.224.25"    # Microsoft Teams
+
 # ============================================================
 # LISTS
 # ============================================================
@@ -144,6 +149,11 @@ validate_config() {
 $(feeds)
 EOF
     [ "$have_s$have_l$have_xl" = 111 ] || die "config: every tier (s, l, xl) needs at least one feed"
+
+    printf '%s\n' "$WHITELIST" > "$WORK/whitelist.in"
+    awk "$WHITELIST_AWK" "$WORK/whitelist.in" > "$WORK/whitelist.unsorted" \
+        || die "config: invalid WHITELIST"
+    sort -n "$WORK/whitelist.unsorted" > "$WORK/whitelist" || die "whitelist: sort failed"
 }
 
 # Download one feed to $RAW/<id>. The file only appears once the transfer
@@ -221,8 +231,7 @@ preprocess() {
 }
 
 # Extract "start end" integer ranges from free-form text, one per line.
-# Comment lines (# or ;) are skipped; reserved space and whitelisted
-# hosts are dropped.
+# Comment lines (# or ;) are skipped and reserved space is dropped.
 #
 # Reserved-range filter magic numbers:
 #   16777215                    = 1.0.0.0 - 1                    -> 0.0.0.0/8
@@ -233,8 +242,6 @@ preprocess() {
 #   2886729728..2887778303      = 172.16.0.0/12
 #   3232235520..3232301055      = 192.168.0.0/16
 #   >= 3758096384               = 224.0.0.0/3 (multicast + reserved)
-#   879870596                   = 52.113.194.132   (whitelist: Teams)
-#   599449625                   = 35.186.224.25    (whitelist: Teams)
 # shellcheck disable=SC2016  # awk program, not shell
 EXTRACT_AWK='
 BEGIN {
@@ -268,16 +275,41 @@ BEGIN {
         if (s <= 2887778303 && e >= 2886729728) continue
         if (s <= 3232301055 && e >= 3232235520) continue
         if (e >= 3758096384) continue
-        if (pfx==32 && s==879870596) continue
-        if (pfx==32 && s==599449625) continue
 
         print s, e
     }
 }
 '
 
+# Parse whitelist entries (whitespace-separated) into "start end" ranges. Rejects
+# anything that is not a canonical IPv4 address or CIDR between /16 and
+# /32, so a typo cannot whitelist a huge range or break the build.
+# shellcheck disable=SC2016  # awk program, not shell
+WHITELIST_AWK='
+function bad(entry, why) {
+    print "whitelist entry \"" entry "\": " why > "/dev/stderr"
+    status = 1
+}
+function parse(entry,   n, q, o, len, size, i, s) {
+    if (entry !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) return bad(entry, "not an IPv4 address or CIDR")
+    n = split(entry, q, "/")
+    split(q[1], o, ".")
+    len = (n == 2) ? q[2] + 0 : 32
+    if (o[1] > 255 || o[2] > 255 || o[3] > 255 || o[4] > 255) return bad(entry, "octet out of range")
+    if (len < 16 || len > 32) return bad(entry, "prefix length must be 16..32")
+    size = 1
+    for (i = len; i < 32; i++) size = size * 2
+    s = o[1]*16777216 + o[2]*65536 + o[3]*256 + o[4]
+    if (s % size) return bad(entry, "host bits set (not a network address)")
+    print s, s + size - 1
+}
+{ for (f = 1; f <= NF; f++) parse($f) }
+END { exit status }
+'
+
 # Merge sorted "start end" ranges (overlapping or adjacent ones are
-# joined) and write each merged range as the minimal set of CIDR blocks to
+# joined), cut out the whitelisted ranges read from wlfile (sorted "start
+# end" lines), and write what is left as the minimal set of CIDR blocks to
 # txt, rsc and ga. Exits 3 if any block is wider than /minpfx.
 # shellcheck disable=SC2016  # awk program, not shell
 BUILD_AWK='
@@ -289,6 +321,12 @@ BEGIN {
     print "/ip firewall address-list" > rsc
     print ":global newips [:toarray \"\"]" > ga
     too_wide = 0
+    nwl = 0
+    while ((getline line < wlfile) > 0) {
+        split(line, r, " ")
+        nwl++; WS[nwl] = r[1] + 0; WE[nwl] = r[2] + 0
+    }
+    close(wlfile)
 }
 function ip(n) {
     return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
@@ -311,11 +349,20 @@ function emit(s, e,   b, sz, addr) {
         s += sz
     }
 }
+# Emit [s, e] minus every whitelisted range.
+function emit_wl(s, e,   i) {
+    for (i = 1; i <= nwl && s <= e; i++) {
+        if (WE[i] < s || WS[i] > e) continue
+        if (WS[i] > s) emit(s, WS[i] - 1)
+        s = WE[i] + 1
+    }
+    if (s <= e) emit(s, e)
+}
 NR == 1 { cs = $1; ce = $2; next }
 $1 <= ce+1 { if ($2 > ce) ce = $2; next }
-{ emit(cs, ce); cs = $1; ce = $2 }
+{ emit_wl(cs, ce); cs = $1; ce = $2 }
 END {
-    if (NR) emit(cs, ce)
+    if (NR) emit_wl(cs, ce)
     if (too_wide) exit 3
 }
 '
@@ -335,6 +382,7 @@ build_list() {
     sort -n "$@" > "$WORK/$list.sorted" || die "$list: sort failed"
     awk -v txt="$STAGE/$list.txt" -v rsc="$STAGE/$list.rsc" \
         -v ga="$STAGE/$ga_list.rsc" -v minpfx="$MIN_PREFIX_LEN" \
+        -v wlfile="$WORK/whitelist" \
         "$BUILD_AWK" "$WORK/$list.sorted" || die "$list: build failed"
 }
 
