@@ -1,0 +1,5 @@
+#   DShield.org Recommended Block List
+#   comment with 9.9.9.9
+Start	End	Netblock	Attacks	Name	Country	email
+12.34.56.0	12.34.56.255	24	1234	EXAMPLE-NET	US	abuse@example.com
+23.45.0.0	23.45.0.255	24	567	EXAMPLE-NET2	DE	abuse@example.net

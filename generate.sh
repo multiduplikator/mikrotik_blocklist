@@ -88,6 +88,19 @@ xl|ipsum_l1|20000|IPsum L1|https://raw.githubusercontent.com/stamparm/ipsum/mast
 EOF
 )
 
+# Where the lists are written. Empty means next to this script.
+OUTDIR=""
+
+# Offline mode: read each feed from $FEEDS_DIR/<id> instead of downloading.
+FEEDS_DIR=""
+
+# An optional shell file that overrides any setting above. The test suite
+# uses it to run against fixture feeds; regular runs do not need it.
+if [ -n "${BLOCKLIST_CONFIG:-}" ]; then
+    # shellcheck source=/dev/null
+    . "$BLOCKLIST_CONFIG"
+fi
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -162,6 +175,16 @@ EOF
 fetch_feed() {
     id="$1"; name="$2"; url="$3"
     dest="$RAW/$id"
+    if [ -n "$FEEDS_DIR" ]; then
+        if cp "$FEEDS_DIR/$id" "$dest.part" 2>/dev/null; then
+            mv "$dest.part" "$dest"
+            log "  + $name (offline)"
+        else
+            rm -f "$dest.part"
+            warn "$name: $FEEDS_DIR/$id not found"
+        fi
+        return 0
+    fi
     if out=$(curl --silent --show-error --fail --location \
             --proto =https --proto-redir =https --compressed \
             --connect-timeout "$CURL_CONNECT_TIMEOUT" \
@@ -431,8 +454,12 @@ check_list() {
 # SCRIPT
 # ============================================================
 
-# Anchor output to the script's own directory, not the caller's CWD.
-OUTDIR="$(cd "$(dirname "$0")" && pwd)"
+# By default, anchor output to the script's own directory, not the
+# caller's CWD.
+if [ -z "$OUTDIR" ]; then
+    OUTDIR="$(cd "$(dirname "$0")" && pwd)"
+fi
+[ -d "$OUTDIR" ] || die "output directory $OUTDIR does not exist"
 
 WORK=""
 STAGE=""

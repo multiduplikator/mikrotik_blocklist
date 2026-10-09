@@ -1,0 +1,22 @@
+; Spamhaus-style CIDR feed. This comment mentions 9.9.9.9 and must be ignored.
+; Last-Modified: Fri, 09 Oct 2026 13:44:02 GMT
+1.10.16.0/20 ; SBL000001
+5.5.0.0/24 ; adjacent to the next entry, the two merge into a /23
+5.5.1.0/24 ; SBL000002
+6.6.6.0/24 ; contains the next entry
+6.6.6.128/25 ; nested
+7.7.7.77/24 ; host bits set, aligned down to the /24
+8.8.0.0/16 ; overlaps an entry in the threatfox fixture
+45.0.0.0/10 ; widest allowed block
+10.1.0.0/16 ; private, dropped
+100.64.1.0/24 ; CGNAT, dropped
+127.0.0.0/8 ; loopback, dropped
+169.254.1.0/24 ; link-local, dropped
+172.16.5.0/24 ; private, dropped
+192.168.1.0/24 ; private, dropped
+224.0.0.0/4 ; multicast, dropped
+240.0.0.0/4 ; reserved, dropped
+0.1.2.0/24 ; zero network, dropped
+256.1.1.0/24 ; invalid octet, dropped
+11.0.0.0/33 ; invalid prefix, dropped
+52.113.194.0/24 ; contains a whitelisted host
