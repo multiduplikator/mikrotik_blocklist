@@ -185,8 +185,9 @@ echo "Extracting ranges..."
 #   599449625                   = 35.186.224.25    (whitelist: Teams)
 awk '
 BEGIN {
+    # P[len] = number of addresses in a /len block (2^(32-len)).
     pw = 1
-    for (i = 0; i <= 32; i++) { P[i] = pw; pw = pw * 2 }
+    for (i = 32; i >= 0; i--) { P[i] = pw; pw = pw * 2 }
     cache = "'"$CACHE"'/"
 }
 {
