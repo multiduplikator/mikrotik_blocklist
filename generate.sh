@@ -37,6 +37,11 @@ RETRY_PASS_DELAY=60         # pause before a second pass over failed feeds
 MAX_DELTA_PCT=30            # max change in entries vs the current lists
 MIN_PREFIX_LEN=10           # no entry may be wider than this (e.g. a /8)
 
+# Block size of the .json lists. RouterOS reads files in chunks of at most
+# 32768 bytes (/file read), so every block must be one complete JSON object
+# of at most this size.
+JSON_BLOCK=32768
+
 # Never block these, even if a feed lists them or a range containing them.
 # Space-separated IPs or CIDRs (/16 to /32). Wider ranges are cut into the
 # smallest set of CIDR blocks that leaves these addresses out.
@@ -470,6 +475,77 @@ END {
 }
 '
 
+# Write a list (sorted .txt input) as fixed-size JSON blocks for RouterOS.
+# Every block is exactly `block` bytes (padded with spaces; the last one is
+# not padded) and holds one JSON object that maps first octet -> second
+# octet -> rest of the address -> 1, e.g.
+#   {"#":{"format":1,"entries":3},"1":{"2":{"3.4":1,"3.8/30":1}},"5":{...}}
+# The "#" header is only in the first block. A first-octet object may
+# continue in the next block; a second-octet group never spans blocks.
+# Exits 3 if a single group does not fit into one block.
+# shellcheck disable=SC2016  # awk program, not shell
+JSON_AWK='
+BEGIN {
+    SP = " "
+    while (length(SP) < block) SP = SP SP
+    body = "{\"#\":{\"format\":1,\"entries\":" entries "}"
+    memb = 1; o1cur = ""; g = ""; go1 = ""; go2 = ""; npend = 0; bad = 0
+}
+function close_block(   s) {
+    s = body ((o1cur != "") ? "}" : "") "}"
+    if (npend) printf "%s%s", pend, substr(SP, 1, block - length(pend)) > out
+    pend = s; npend = 1
+    body = "{"; memb = 0; o1cur = ""
+}
+function flush_group(   grp, piece) {
+    if (g == "") return
+    grp = "\"" go2 "\":{" g "}"
+    if (go1 == o1cur) piece = "," grp
+    else piece = ((o1cur != "") ? "}" : "") (memb ? "," : "") "\"" go1 "\":{" grp
+    if (length(body) + length(piece) + 2 > block) {
+        close_block()
+        piece = "\"" go1 "\":{" grp
+        if (length(body) + length(piece) + 2 > block) {
+            print "json: group " go1 "." go2 " does not fit into a " block "-byte block" > "/dev/stderr"
+            bad = 1
+        }
+    }
+    body = body piece; o1cur = go1; memb = 1; g = ""
+}
+{
+    i = index($0, "."); o1 = substr($0, 1, i - 1); r = substr($0, i + 1)
+    j = index(r, "."); o2 = substr(r, 1, j - 1); rest = substr(r, j + 1)
+    if (o1 != go1 || o2 != go2) { flush_group(); go1 = o1; go2 = o2 }
+    g = g ((g == "") ? "" : ",") "\"" rest "\":1"
+}
+END {
+    flush_group()
+    close_block()
+    printf "%s", pend > out
+    if (bad) exit 3
+}
+'
+
+# Check a .json list: header with the right entry count, one entry per
+# list line, and every block a self-contained object of at most `block`
+# bytes (starts with "{", braces balance to zero at its end).
+# shellcheck disable=SC2016  # awk program, not shell
+JSON_CHECK_AWK='
+{ s = s $0 }
+END {
+    hdr = "{\"#\":{\"format\":1,\"entries\":" n "}"
+    if (index(s, hdr) != 1) { print "bad header"; exit 1 }
+    t = substr(s, length(hdr) + 1)
+    if (gsub(/":1/, "", t) != n) { print "entry count differs"; exit 1 }
+    for (off = 1; off <= length(s); off += block) {
+        c = substr(s, off, block)
+        if (substr(c, 1, 1) != "{") { print "block at " off - 1 " does not start an object"; exit 1 }
+        o = c; cl = c
+        if (gsub(/[{]/, "", o) != gsub(/[}]/, "", cl)) { print "block at " off - 1 " is not self-contained"; exit 1 }
+    }
+}
+'
+
 # Build one list into $STAGE from the ranges of the given feed tiers.
 build_list() {
     list="$1"; ga_list="$2"; tiers="$3"
@@ -487,6 +563,9 @@ build_list() {
         -v ga="$STAGE/$ga_list.rsc" -v minpfx="$MIN_PREFIX_LEN" \
         -v wlfile="$WORK/whitelist" \
         "$BUILD_AWK" "$WORK/$list.sorted" || die "$list: build failed"
+    awk -v out="$STAGE/$list.json" -v block="$JSON_BLOCK" \
+        -v entries="$(($(wc -l < "$STAGE/$list.txt")))" \
+        "$JSON_AWK" "$STAGE/$list.txt" || die "$list: json build failed"
 }
 
 # Validate one staged list: shape of every line, consistent entry counts
@@ -514,6 +593,9 @@ check_list() {
     fi
     if [ "$n" -lt "$min" ] || [ "$n" -gt "$max" ]; then
         die "$list: $n entries, outside the expected $min..$max"
+    fi
+    if ! why=$(awk -v n="$n" -v block="$JSON_BLOCK" "$JSON_CHECK_AWK" "$STAGE/$list.json"); then
+        die "$list.json: $why"
     fi
 
     prev="$OUTDIR/$list.txt"

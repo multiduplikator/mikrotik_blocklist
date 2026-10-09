@@ -88,6 +88,29 @@ expect_failure() {
     fi
 }
 
+# decode_json <file.json> <block size>
+# Prints the entries of a .json list, one per line, reading it the way the
+# RouterOS script does: fixed-size blocks, each parsed on its own.
+decode_json() {
+    awk -v B="$2" '
+    { s = s $0 }
+    END {
+        for (off = 1; off <= length(s); off += B) {
+            c = substr(s, off, B)
+            if (off + B <= length(s) && length(c) != B) { print "short block"; exit 1 }
+            depth = 0; key = ""
+            while (match(c, /"[^"]*"|[{}:,]|[0-9]+/)) {
+                t = substr(c, RSTART, RLENGTH); c = substr(c, RSTART + RLENGTH)
+                if (t == "{") { depth++; K[depth] = key }
+                else if (t == "}") depth--
+                else if (t ~ /^"/) key = substr(t, 2, length(t) - 2)
+                else if (t ~ /^[0-9]+$/ && depth == 3 && K[2] != "#") print K[2] "." K[3] "." key
+            }
+            if (depth != 0) { print "unbalanced block"; exit 1 }
+        }
+    }' "$1"
+}
+
 if [ "${1:-}" = "--update" ]; then
     use_awk gawk || use_awk mawk || { echo "no awk found" >&2; exit 1; }
     if ! run_gen "$TMP/expected"; then
@@ -132,6 +155,22 @@ for awk_name in gawk mawk busybox; do
         head -n 20 "$out.diff" | sed 's/^/        /'
     else
         ok "golden: output matches tests/expected"
+    fi
+
+    json_ok=1
+    for list in blocklist blocklist_l blocklist_xl; do
+        if [ -f "$out/$list.json" ] && [ -f "$out/$list.txt" ]; then
+            decode_json "$out/$list.json" 200 | sort > "$out.$list.decoded"
+            sort "$out/$list.txt" > "$out.$list.sorted"
+            cmp -s "$out.$list.decoded" "$out.$list.sorted" || json_ok=0
+        else
+            json_ok=0
+        fi
+    done
+    if [ "$json_ok" = 1 ]; then
+        ok "json: every list decodes block by block to exactly its .txt"
+    else
+        not_ok "json: decoded entries differ from the .txt lists"
     fi
 
     if run_gen "$out" && grep -q '(0% change)' "$out.log" &&
@@ -183,6 +222,8 @@ for awk_name in gawk mawk busybox; do
     PREVIOUS_TXT="1.1.1.1"
     expect_failure "change above limit" "changed by" ""
     PREVIOUS_TXT=""
+    expect_failure "json group larger than a block" "does not fit into a 60-byte block" \
+        'JSON_BLOCK=60'
 done
 
 echo

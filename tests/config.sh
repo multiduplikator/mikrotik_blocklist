@@ -23,3 +23,7 @@ EOF
 )
 
 WHITELIST="52.113.194.132 35.186.224.25"
+
+# Tiny JSON blocks, so the fixtures span several blocks and first-octet
+# objects continue across block boundaries.
+JSON_BLOCK=200
