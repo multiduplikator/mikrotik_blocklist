@@ -6,6 +6,7 @@ on:
     - cron: "0 */3 * * *"
   workflow_dispatch:
 
+# Least-privilege default; the build job opts into contents:write below.
 permissions: {}
 
 concurrency:
@@ -26,8 +27,15 @@ jobs:
 
       - name: Install gawk
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gawk
+          # The script's only hard dependency is GNU gawk (its awk programs
+          # use lshift/and/compl, which mawk/busybox lack). ubuntu-latest
+          # already ships gawk; on a slim runner this installs it. Guard so
+          # we skip the apt lock + network when it's already present.
+          if ! command -v gawk >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gawk
+          fi
+          gawk --version | head -1
 
       - name: Generate Blocklists
         run: |
@@ -37,28 +45,36 @@ jobs:
       - name: Validate Generated Lists
         run: |
           set -euo pipefail
+
+          # Single source of truth for the generated files. Reused by the
+          # existence check, the shape checks, the delta check, and the
+          # commit step (exported via GITHUB_ENV below).
           MAIN_FILES=(
             blocklist.rsc blocklist.txt blocklist_ga.rsc
             blocklist_l.rsc blocklist_l.txt blocklist_ga_l.rsc
             blocklist_xl.rsc blocklist_xl.txt blocklist_ga_xl.rsc
           )
+          RSC_FILES=(blocklist.rsc blocklist_l.rsc blocklist_xl.rsc)
+          GA_FILES=(blocklist_ga.rsc blocklist_ga_l.rsc blocklist_ga_xl.rsc)
+          TXT_FILES=(blocklist.txt blocklist_l.txt blocklist_xl.txt)
+
           for f in "${MAIN_FILES[@]}"; do
             test -s "$f" || { echo "::error::$f is missing or empty"; exit 1; }
           done
 
           # Shape checks: only expected RouterOS commands appear.
-          for f in blocklist.rsc blocklist_l.rsc blocklist_xl.rsc; do
+          for f in "${RSC_FILES[@]}"; do
             head -n1 "$f" | grep -qxF "/ip firewall address-list" \
               || { echo "::error::$f header wrong"; exit 1; }
             if tail -n +2 "$f" | grep -vE '^add list=new_blocklist address="[0-9./]+" comment="blocklist"$' | head -1 | grep -q .; then
-              echo "::error::$f contains unexpected line(s)"; exit 1
+              echo "::error::$f contains unexpected line(s)"; exit 1;
             fi
           done
-          for f in blocklist_ga.rsc blocklist_ga_l.rsc blocklist_ga_xl.rsc; do
+          for f in "${GA_FILES[@]}"; do
             head -n1 "$f" | grep -qxF ':global newips [:toarray ""]' \
               || { echo "::error::$f header wrong"; exit 1; }
             if tail -n +2 "$f" | grep -vE '^:set newips \(\$newips,"[0-9./]+"\)$' | head -1 | grep -q .; then
-              echo "::error::$f contains unexpected line(s)"; exit 1
+              echo "::error::$f contains unexpected line(s)"; exit 1;
             fi
           done
 
@@ -71,7 +87,10 @@ jobs:
           [ "$lg"  -ge 15000 ] && [ "$lg"  -le 80000 ]  || { echo "::error::large out of range ($lg)"; exit 1; }
           [ "$xl"  -ge 40000 ] && [ "$xl"  -le 150000 ] || { echo "::error::xl out of range ($xl)"; exit 1; }
 
-          # Delta regression: warn (or fail) on abrupt changes vs previous commit.
+          # Delta regression: fail on abrupt changes vs the previous commit.
+          # Check the .txt (human-readable) AND the .rsc (what routers load)
+          # so a silently-dropped feed can't ship a changed list while the
+          # .txt stays in range.
           delta_check() {
             local f="$1" thresh="$2"
             local new; new=$(wc -l < "$f")
@@ -87,15 +106,15 @@ jobs:
               fi
             fi
           }
-          delta_check blocklist.txt 30
-          delta_check blocklist_l.txt 30
-          delta_check blocklist_xl.txt 30
+          for f in "${TXT_FILES[@]}"; do delta_check "$f" 30; done
+          for f in "${RSC_FILES[@]}"; do delta_check "$f" 30; done
 
-          # Persist counts for the summary step.
+          # Persist counts + the file list for the summary and commit steps.
           {
             echo "STD=$std"
             echo "LG=$lg"
             echo "XL=$xl"
+            echo "MAIN_FILES=${MAIN_FILES[*]}"
           } >> "$GITHUB_ENV"
 
       - name: Write Step Summary
@@ -117,9 +136,10 @@ jobs:
           NOW=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           git config --local user.email "noreply@github.actions.bot"
           git config --local user.name "GitHub Actions"
-          git add blocklist.rsc blocklist.txt blocklist_ga.rsc \
-                  blocklist_l.rsc blocklist_l.txt blocklist_ga_l.rsc \
-                  blocklist_xl.rsc blocklist_xl.txt blocklist_ga_xl.rsc
+          # Reuse the file list exported by the Validate step (single source
+          # of truth) instead of re-listing the files here.
+          read -r -a FILES <<< "$MAIN_FILES"
+          git add "${FILES[@]}"
           git status
           if ! git diff --cached --quiet; then
             git commit -m "Regenerate blocklists - $NOW"

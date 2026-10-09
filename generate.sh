@@ -9,7 +9,13 @@
 #   - DShield CIDR preprocess with a format-drift guard
 #   - Broader reserved-range filter (CGNAT, link-local, multicast+reserved)
 #
-# Requires: curl, gawk, sed, grep (all default on ubuntu-latest).
+# Requires: curl, GNU gawk (bit-ops lshift/rshift/and/compl), sed, grep.
+#   sort is plain POSIX. The ONLY hard dependency is GNU gawk -- the awk
+#   programs use GNU extensions (lshift, rshift, and, compl) that mawk and
+#   busybox awk do NOT implement. So this runs on any minimal/slim image
+#   (ubuntu-slim, debian-slim, alpine+gawk) as long as gawk is installed;
+#   it will NOT run on a stock image whose default awk is mawk/busybox.
+#   On ubuntu-latest gawk is preinstalled; on slim images apt-install it.
 
 set -eu
 export LC_ALL=C
@@ -66,7 +72,9 @@ PREPROCESS_DSHIELD="dshield.out_s"
 # SCRIPT
 # ============================================================
 
-OUTDIR="$(pwd)"
+# Anchor output to the script's own directory, not the caller's CWD, so
+# `bash /path/to/generate.sh` from anywhere still writes next to the script.
+OUTDIR="$(cd "$(dirname "$0")" && pwd)"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
@@ -77,14 +85,17 @@ cd "$TMPDIR"
 
 download() {
     url="$1"; output="$2"; name="$3"
-    if curl -sfL \
+    # Capture curl's stderr so a real failure (DNS/TLS/404) is diagnosable
+    # in unattended CI rather than a bare "(failed)".
+    err=$(curl -sfSL \
             --connect-timeout "$CURL_CONNECT_TIMEOUT" \
             --max-time "$CURL_MAX_TIME" \
             --retry "$CURL_RETRIES" \
             --retry-delay "$CURL_RETRY_DELAY" \
             --retry-connrefused --retry-all-errors \
             -A "$UA" \
-            "$url" -o "$output" 2>/dev/null; then
+            "$url" -o "$output" 2>&1)
+    if [ $? -eq 0 ]; then
         if [ -s "$output" ]; then
             echo "  + $name"
         else
@@ -92,7 +103,8 @@ download() {
             rm -f "$output"
         fi
     else
-        echo "  ! $name (failed)"
+        # Last line of curl's error output is the actionable reason.
+        echo "  ! $name (failed: $(printf '%s' "$err" | tail -n1))"
         rm -f "$output"
     fi
 }
@@ -126,8 +138,17 @@ if [ -s "$PREPROCESS_DSHIELD.raw" ]; then
     # /24 block to a single host (~99% coverage loss with no error).
     awk '/^[0-9]/ && $3 ~ /^[0-9]+$/ && $3+0 >= 1 && $3+0 <= 32 {print $1"/"$3}' \
         "$PREPROCESS_DSHIELD.raw" > "$PREPROCESS_DSHIELD"
-    raw_lines=$(grep -c '^[0-9]' "$PREPROCESS_DSHIELD.raw" 2>/dev/null || echo 0)
-    kept_lines=$(wc -l < "$PREPROCESS_DSHIELD" 2>/dev/null || echo 0)
+    # grep -c exits 1 on zero matches (printing "0"), so `|| echo 0` would
+    # append a second 0 and yield a multi-line value. Use `|| true` and a
+    # default instead.
+    raw_lines=$(grep -c '^[0-9]' "$PREPROCESS_DSHIELD.raw" 2>/dev/null || true)
+    raw_lines=${raw_lines:-0}
+    kept_lines=$(wc -l < "$PREPROCESS_DSHIELD" 2>/dev/null || true)
+    kept_lines=${kept_lines:-0}
+    # A healthy DShield file converts ~1:1 (each range row -> one CIDR).
+    # If fewer than half the rows survive, the upstream format likely
+    # changed (e.g. a new column shifted the netmask field), so drop the
+    # feed rather than ship a silently-truncated list.
     if [ "$raw_lines" -gt 0 ] && [ "$kept_lines" -lt "$((raw_lines / 2))" ]; then
         echo "  ! DShield preprocess kept $kept_lines/$raw_lines rows (format change?); dropping feed"
         rm -f "$PREPROCESS_DSHIELD"
@@ -210,7 +231,12 @@ build_list() {
     base="$1"; shift
     outbase="$OUTDIR/$base"
 
-    sort -n -S 50% "$@" | gawk \
+    # Plain POSIX 'sort -n' (no GNU -S flag) -- the ranges files are a few
+    # hundred thousand short lines and sort handles them in <0.1s with its
+    # own buffer heuristic. Keeping it POSIX means the only hard dependency
+    # is GNU gawk (for the bit-ops below), so the script runs on any
+    # minimal/slim image that has gawk installed.
+    sort -n "$@" | gawk \
         -v base="$base" \
         -v outbase="$outbase" \
         -v outdir="$OUTDIR" '
@@ -276,9 +302,22 @@ if [ "$fail" -eq 1 ]; then
     exit 1
 fi
 
+# A bare `wait` under `set -e` does NOT abort on a failed background job
+# (it returns 0), so a build_list failure would silently ship partial
+# files. Capture the exit status explicitly and fail loudly.
 build_list "blocklist"     "$CACHE"/*.out_s.ranges &
+pid_s=$!
 build_list "blocklist_l"   "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges &
+pid_l=$!
 build_list "blocklist_xl"  "$CACHE"/*.out_s.ranges "$CACHE"/*.out_l.ranges "$CACHE"/*.out_xl.ranges &
-wait
+pid_xl=$!
+build_fail=0
+wait "$pid_s"  || build_fail=1
+wait "$pid_l"  || build_fail=1
+wait "$pid_xl" || build_fail=1
+if [ "$build_fail" -ne 0 ]; then
+    echo "  ! build_list failed; aborting to avoid committing partial lists." >&2
+    exit 1
+fi
 
 echo "Done!"
