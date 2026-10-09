@@ -11,15 +11,17 @@ sh tests/run.sh
 `run.sh` runs the real, unmodified `generate.sh` with every installed awk (gawk, mawk, busybox awk) and checks:
 
 - **Output.** The lists generated from `fixtures/` must be byte-identical to `expected/`, and a second run must produce no change.
+- **Retry pass.** A feed that is an error page in the first pass and fine in the second must be recovered. The test config overrides `sleep` to swap in the good file.
 - **Failure scenarios.** Each of these must make the run fail, leave the existing lists untouched and leave no temporary files behind:
   - a feed is missing
+  - a feed is empty
   - a feed is an HTML page instead of data
   - a feed is below its minimum
   - DShield changed its format
   - two kinds of invalid whitelist entry
   - an entry is wider than allowed
   - a list is out of bounds
-  - the config is invalid
+  - three kinds of invalid config: a feed tier no list uses, a list tier with no feeds, a non-numeric list bound
   - a list changed too much
 
 ## How it works

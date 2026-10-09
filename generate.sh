@@ -28,8 +28,8 @@ UA="multiduplikator/mikrotik_blocklist regenerator (github.com/multiduplikator/m
 CURL_CONNECT_TIMEOUT=30
 CURL_MAX_TIME=120           # per attempt
 CURL_RETRIES=3
-CURL_RETRY_DELAY=5          # doubles after each attempt
-CURL_RETRY_MAX_TIME=300     # total budget for one feed, including retries
+CURL_RETRY_DELAY=5          # fixed pause between attempts
+CURL_RETRY_MAX_TIME=300     # no new attempt starts after this many seconds
 RETRY_PASS_DELAY=60         # pause before a second pass over failed feeds
 
 # Output sanity checks. A run that violates any of them aborts before the
@@ -49,7 +49,9 @@ WHITELIST="52.113.194.132 35.186.224.25"    # Microsoft Teams
 #
 # list:    base name of the .txt and .rsc outputs
 # ga_list: base name of the global-array .rsc output
-# tiers:   space-separated feed tiers included in this list
+# tiers:   space-separated feed tiers included in this list. Every tier
+#          named here needs at least one feed, and every feed tier must be
+#          used by at least one list.
 
 LISTS=$(cat <<'EOF'
 blocklist|blocklist_ga|s|8000|60000
@@ -63,7 +65,7 @@ EOF
 # ============================================================
 # Format: <tier>|<id>|<min_ranges>|<display_name>|<url>
 #
-# tier:
+# tier: which lists include the feed (see LISTS above):
 #   s   -> Standard (also in Large and XL)
 #   l   -> Large (also in XL)
 #   xl  -> XL only
@@ -138,20 +140,50 @@ feeds() {
 }
 
 validate_config() {
-    have_s=0 have_l=0 have_xl=0 ids=" "
+    list_tiers=" " names=" "
+    while IFS='|' read -r list ga_list tiers min max; do
+        [ -n "$list" ] || continue
+        for n in "$list" "$ga_list"; do
+            case "$n" in
+                ''|*[!A-Za-z0-9_]*) die "config: invalid list name '$n'" ;;
+            esac
+            case "$names" in
+                *" $n "*) die "config: duplicate list name '$n'" ;;
+            esac
+            names="$names$n "
+        done
+        [ -n "$tiers" ] || die "config: list '$list' has no tiers"
+        for t in $tiers; do
+            case "$list_tiers" in
+                *" $t "*) ;;
+                *) list_tiers="$list_tiers$t " ;;
+            esac
+        done
+        case "$min$max" in
+            *[!0-9]*) min="" ;;
+        esac
+        if [ -z "$min" ] || [ -z "$max" ] || [ "$min" -gt "$max" ]; then
+            die "config: list '$list' needs numeric bounds with min <= max"
+        fi
+    done <<EOF
+$LISTS
+EOF
+
+    feed_tiers=" " ALL_IDS=""
     while IFS='|' read -r tier id min name url; do
         [ -n "$tier" ] || continue
-        case "$tier" in
-            s) have_s=1 ;; l) have_l=1 ;; xl) have_xl=1 ;;
-            *) die "config: feed '$id' has unknown tier '$tier'" ;;
-        esac
         case "$id" in
             ''|*[!a-z0-9_]*) die "config: invalid feed id '$id'" ;;
         esac
-        case "$ids" in
+        case " $ALL_IDS " in
             *" $id "*) die "config: duplicate feed id '$id'" ;;
         esac
-        ids="$ids$id "
+        ALL_IDS="$ALL_IDS $id"
+        case "$list_tiers" in
+            *" $tier "*) ;;
+            *) die "config: feed '$id' has tier '$tier', which no list uses" ;;
+        esac
+        feed_tiers="$feed_tiers$tier "
         case "$min" in
             ''|*[!0-9]*|0) die "config: feed '$id' needs a min_ranges >= 1" ;;
         esac
@@ -161,7 +193,12 @@ validate_config() {
     done <<EOF
 $(feeds)
 EOF
-    [ "$have_s$have_l$have_xl" = 111 ] || die "config: every tier (s, l, xl) needs at least one feed"
+    for t in $list_tiers; do
+        case "$feed_tiers" in
+            *" $t "*) ;;
+            *) die "config: tier '$t' is used by a list but has no feeds" ;;
+        esac
+    done
 
     printf '%s\n' "$WHITELIST" > "$WORK/whitelist.in"
     awk "$WHITELIST_AWK" "$WORK/whitelist.in" > "$WORK/whitelist.unsorted" \
@@ -170,22 +207,17 @@ EOF
 }
 
 # Download one feed to $RAW/<id>. The file only appears once the transfer
-# has completed successfully, so a partial download can never be mistaken
-# for a good one.
+# has completed successfully and is non-empty, so a partial or empty
+# download can never be mistaken for a good one. Runs as a background job;
+# curl runs as its own child so that it can be stopped on TERM.
 fetch_feed() {
     id="$1"; name="$2"; url="$3"
     dest="$RAW/$id"
+    rm -f "$dest"
     if [ -n "$FEEDS_DIR" ]; then
-        if cp "$FEEDS_DIR/$id" "$dest.part" 2>/dev/null; then
-            mv "$dest.part" "$dest"
-            log "  + $name (offline)"
-        else
-            rm -f "$dest.part"
-            warn "$name: $FEEDS_DIR/$id not found"
-        fi
-        return 0
-    fi
-    if out=$(curl --silent --show-error --fail --location \
+        cp "$FEEDS_DIR/$id" "$dest.part" 2> "$dest.err" &
+    else
+        curl --silent --show-error --fail --location \
             --proto =https --proto-redir =https --compressed \
             --connect-timeout "$CURL_CONNECT_TIMEOUT" \
             --max-time "$CURL_MAX_TIME" \
@@ -194,36 +226,84 @@ fetch_feed() {
             --retry-max-time "$CURL_RETRY_MAX_TIME" \
             --retry-connrefused --retry-all-errors \
             --user-agent "$UA" \
-            --output "$dest.part" "$url" 2>&1); then
+            --output "$dest.part" "$url" 2> "$dest.err" &
+    fi
+    child=$!
+    trap 'kill "$child" 2>/dev/null; exit 143' TERM
+    if ! wait "$child"; then
+        # Last line of curl's (or cp's) error output is the actionable reason.
+        warn "$name: download failed: $(tail -n 1 "$dest.err")"
+        rm -f "$dest.part"
+    elif [ ! -s "$dest.part" ]; then
+        warn "$name: download failed: empty response"
+        rm -f "$dest.part"
+    else
         mv "$dest.part" "$dest"
         log "  + $name"
-    else
-        rm -f "$dest.part"
-        # Last line of curl's output is the actionable reason.
-        warn "$name: download failed: $(printf '%s\n' "$out" | tail -n 1)"
     fi
+    rm -f "$dest.err"
 }
 
-# Fetch, in parallel, every feed that is not downloaded yet.
-fetch_missing() {
+# Download the given feeds (by id) in parallel.
+fetch_feeds() {
     while IFS='|' read -r tier id min name url; do
-        [ -n "$tier" ] || continue
-        [ -s "$RAW/$id" ] || fetch_feed "$id" "$name" "$url" &
+        case " $* " in
+            *" $id "*) ;;
+            *) continue ;;
+        esac
+        fetch_feed "$id" "$name" "$url" &
+        JOBS="$JOBS $!"
     done <<EOF
 $(feeds)
 EOF
     wait
+    JOBS=""
 }
 
-count_missing() {
-    n=0
+# Turn one downloaded feed into $RANGES/<id>.<tier>. Sets FEED_COUNT and,
+# if the feed is unusable, FEED_STATUS (and returns non-zero).
+check_feed() {
+    tier="$1"; id="$2"; min="$3"
+    FEED_COUNT=0
+    FEED_STATUS=""
+    rm -f "$RANGES/$id.$tier"
+    if [ ! -s "$RAW/$id" ]; then
+        FEED_STATUS="download failed"
+    elif ! preprocess "$id" "$RAW/$id" "$FEED/$id"; then
+        FEED_STATUS="unexpected format"
+    elif ! awk "$EXTRACT_AWK" "$FEED/$id" > "$RANGES/$id.$tier"; then
+        FEED_STATUS="extraction failed"
+    else
+        FEED_COUNT=$(($(wc -l < "$RANGES/$id.$tier")))
+        if [ "$FEED_COUNT" -lt "$min" ]; then
+            FEED_STATUS="only $FEED_COUNT ranges (minimum $min)"
+        fi
+    fi
+    if [ -n "$FEED_STATUS" ]; then
+        rm -f "$RANGES/$id.$tier"
+        return 1
+    fi
+}
+
+# Check the given feeds (by id). Records each result in $STATUS/<id> and
+# sets FAILED_IDS to the feeds that are unusable.
+check_feeds() {
+    FAILED_IDS=""
     while IFS='|' read -r tier id min name url; do
-        [ -n "$tier" ] || continue
-        [ -s "$RAW/$id" ] || n=$((n + 1))
+        case " $* " in
+            *" $id "*) ;;
+            *) continue ;;
+        esac
+        if check_feed "$tier" "$id" "$min"; then
+            log "  $name: $FEED_COUNT ranges"
+        else
+            warn "$name: $FEED_STATUS"
+            FAILED_IDS="$FAILED_IDS $id"
+        fi
+        printf '%s|%s\n' "$FEED_COUNT" "$FEED_STATUS" > "$STATUS/$id"
     done <<EOF
 $(feeds)
 EOF
-    echo "$n"
 }
 
 # Convert a raw feed into something the generic extractor understands.
@@ -447,7 +527,8 @@ check_list() {
     else
         log "  $list: $n entries (no previous list)"
     fi
-    summary "| $list | $n |"
+    LIST_ROWS="$LIST_ROWS| $list | $n |
+"
 }
 
 # ============================================================
@@ -463,7 +544,14 @@ fi
 
 WORK=""
 STAGE=""
+JOBS=""
 cleanup() {
+    # Stop downloads still running (only after INT/TERM).
+    if [ -n "$JOBS" ]; then
+        # shellcheck disable=SC2086  # list of PIDs
+        kill $JOBS 2>/dev/null || true
+        wait
+    fi
     if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
     if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
 }
@@ -475,47 +563,42 @@ WORK=$(mktemp -d)
 RAW="$WORK/raw"
 FEED="$WORK/feed"
 RANGES="$WORK/ranges"
-mkdir "$RAW" "$FEED" "$RANGES"
+STATUS="$WORK/status"
+mkdir "$RAW" "$FEED" "$RANGES" "$STATUS"
 # New lists are staged next to the old ones and only moved into place
 # once all of them pass the checks.
 STAGE=$(mktemp -d "$OUTDIR/.generate.XXXXXX")
 
 validate_config
 
+# shellcheck disable=SC2086  # ALL_IDS / FAILED_IDS are lists of plain ids
+{
 log "Downloading feeds..."
-fetch_missing
-missing=$(count_missing)
-if [ "$missing" -gt 0 ]; then
-    log "$missing feed(s) failed; retrying them in ${RETRY_PASS_DELAY}s..."
-    sleep "$RETRY_PASS_DELAY"
-    fetch_missing
-fi
-
+fetch_feeds $ALL_IDS
 log "Extracting ranges..."
+check_feeds $ALL_IDS
+
+# Second pass: anything unusable -- failed, empty, truncated, an error page
+# instead of data -- is downloaded and checked once more.
+if [ -n "$FAILED_IDS" ]; then
+    log "Retrying$FAILED_IDS in ${RETRY_PASS_DELAY}s..."
+    sleep "$RETRY_PASS_DELAY"
+    fetch_feeds $FAILED_IDS
+    check_feeds $FAILED_IDS
+fi
+}
+
 summary "| Feed | Tier | Ranges | Status |"
 summary "|---|---|---:|---|"
 failed=""
 while IFS='|' read -r tier id min name url; do
     [ -n "$tier" ] || continue
-    status=""
-    count=0
-    if [ ! -s "$RAW/$id" ]; then
-        status="download failed"
-    elif ! preprocess "$id" "$RAW/$id" "$FEED/$id"; then
-        status="unexpected format"
-    else
-        awk "$EXTRACT_AWK" "$FEED/$id" > "$RANGES/$id.$tier"
-        count=$(($(wc -l < "$RANGES/$id.$tier")))
-        if [ "$count" -lt "$min" ]; then
-            status="only $count ranges (minimum $min)"
-        fi
-    fi
+    IFS='|' read -r count status < "$STATUS/$id"
     if [ -n "$status" ]; then
         err "$name: $status"
         failed="$failed${failed:+, }$name"
         summary "| $name | $tier | $count | :x: $status |"
     else
-        log "  $name: $count ranges"
         summary "| $name | $tier | $count | ok |"
     fi
 done <<EOF
@@ -526,9 +609,6 @@ if [ -n "$failed" ]; then
 fi
 
 log "Building lists..."
-summary ""
-summary "| List | Entries |"
-summary "|---|---:|"
 while IFS='|' read -r list ga_list tiers min max; do
     [ -n "$list" ] || continue
     build_list "$list" "$ga_list" "$tiers"
@@ -537,6 +617,7 @@ $LISTS
 EOF
 
 log "Checking lists..."
+LIST_ROWS=""
 while IFS='|' read -r list ga_list tiers min max; do
     [ -n "$list" ] || continue
     check_list "$list" "$ga_list" "$min" "$max"
@@ -549,4 +630,8 @@ EOF
 for f in "$STAGE"/*; do
     mv "$f" "$OUTDIR/"
 done
+summary ""
+summary "| List | Entries |"
+summary "|---|---:|"
+summary "$LIST_ROWS"
 log "Done!"

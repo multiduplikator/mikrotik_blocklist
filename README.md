@@ -56,7 +56,7 @@ The generator lives in [`generate.sh`](generate.sh) and runs under GitHub Action
 
 ### How a run works
 
-1. **Download** all feeds in parallel. Each download goes to a temporary file that is only kept if the transfer completes, so a truncated feed can never pass as a good one. Failed feeds are retried by curl (with backoff) and then once more in a second pass a minute later.
+1. **Download** all feeds in parallel. Each download goes to a temporary file that is only kept if the transfer completes and is not empty, so a truncated feed can never pass as a good one. curl retries failed transfers itself. Any feed that is still unusable after extraction (failed, empty, below its minimum, or an error page instead of data) is downloaded and checked once more in a second pass a minute later.
 2. **Extract** IPv4 addresses and CIDRs from each feed. Comment lines are skipped, invalid entries ignored, and [reserved address space](#filtered-addresses) dropped. DShield's `startIP endIP netmask` rows are converted to CIDRs first.
 3. **Build** the three lists: overlapping and adjacent ranges are merged, whitelisted addresses are cut out, and the result is written as the smallest set of CIDR blocks in all three file formats.
 4. **Check** the new lists, then replace the old ones. Nothing is overwritten until every check below has passed.
@@ -76,7 +76,7 @@ Errors name the failing feed or list and show up as annotations in the GitHub Ac
 
 ### Tests and CI
 
-- `tests/run.sh` runs the real `generate.sh` in offline mode against fixture feeds, with every installed awk (gawk, mawk, busybox). It checks the output byte-for-byte against `tests/expected` and runs ten failure scenarios, each of which must abort without touching the existing lists. See [`tests/README.md`](tests/README.md) for details, how to update the expected output after an intended change, and how to try out a new feed offline.
+- `tests/run.sh` runs the real `generate.sh` in offline mode against fixture feeds, with every installed awk (gawk, mawk, busybox). It checks the output byte-for-byte against `tests/expected` and runs a retry-pass recovery check and thirteen failure scenarios, each of which must abort without touching the existing lists. See [`tests/README.md`](tests/README.md) for details, how to update the expected output after an intended change, and how to try out a new feed offline.
 - CI lints the scripts with shellcheck and runs the tests before every generation run. It clones only the latest commit, and only commits and pushes on `main`; a manual run on any other branch is a dry run.
 
 ### Credits

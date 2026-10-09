@@ -90,22 +90,25 @@ expect_failure() {
 
 if [ "${1:-}" = "--update" ]; then
     use_awk gawk || use_awk mawk || { echo "no awk found" >&2; exit 1; }
-    rm -rf "$EXPECTED"
-    if ! run_gen "$EXPECTED"; then
-        cat "$EXPECTED.log"
+    if ! run_gen "$TMP/expected"; then
+        cat "$TMP/expected.log"
+        echo "generate.sh failed; $EXPECTED left unchanged." >&2
         exit 1
     fi
-    rm -f "$EXPECTED.cfg" "$EXPECTED.log"
+    rm -rf "$EXPECTED"
+    cp -R "$TMP/expected" "$EXPECTED"
     echo "Updated $EXPECTED -- review the diff before committing."
     exit 0
 fi
 
 # Fixture variants for the failure scenarios.
-mkdir "$TMP/no-cins" "$TMP/html-cins" "$TMP/dshield-drift"
+mkdir "$TMP/no-cins" "$TMP/html-cins" "$TMP/dshield-drift" "$TMP/empty-cins"
 cp "$TESTS_DIR"/fixtures/* "$TMP/no-cins/"
 rm "$TMP/no-cins/cins"
 cp "$TESTS_DIR"/fixtures/* "$TMP/html-cins/"
 printf '<!DOCTYPE html>\n<html><body>Checking your browser...</body></html>\n' > "$TMP/html-cins/cins"
+cp "$TESTS_DIR"/fixtures/* "$TMP/empty-cins/"
+: > "$TMP/empty-cins/cins"
 cp "$TESTS_DIR"/fixtures/* "$TMP/dshield-drift/"
 # Netmask column moved: column 3 is no longer a prefix length.
 awk -F '\t' 'BEGIN { OFS = "\t" } /^[0-9]/ { $3 = "x" } { print }' \
@@ -138,8 +141,25 @@ for awk_name in gawk mawk busybox; do
         not_ok "rerun: second run differs or failed"
     fi
 
+    # The feed is an error page in the first pass and fixed by the time of
+    # the second; the sourced config overrides `sleep` to make the swap.
+    out="$TMP/$awk_name-retry"
+    rm -rf "$out.feeds"
+    cp -R "$TMP/html-cins" "$out.feeds"
+    if run_gen "$out" "FEEDS_DIR=\"$out.feeds\"" \
+            "sleep() { cp \"\$TESTS_DIR/fixtures/cins\" \"$out.feeds/cins\"; }" &&
+        grep -q 'Retrying cins' "$out.log" &&
+        diff -r "$EXPECTED" "$out" > /dev/null; then
+        ok "retry pass: recovers a feed that was bad in the first pass"
+    else
+        not_ok "retry pass: did not recover"
+        sed 's/^/        /' "$out.log"
+    fi
+
     expect_failure "missing feed" "Fixture CINS: download failed" \
         "FEEDS_DIR=\"$TMP/no-cins\""
+    expect_failure "empty feed" "Fixture CINS: download failed: empty response" \
+        "FEEDS_DIR=\"$TMP/empty-cins\""
     expect_failure "HTML instead of feed" "Fixture CINS: only 0 ranges (minimum 3)" \
         "FEEDS_DIR=\"$TMP/html-cins\""
     expect_failure "feed below minimum" "Fixture DROP: only 9 ranges (minimum 50)" \
@@ -154,8 +174,12 @@ for awk_name in gawk mawk busybox; do
         'MIN_PREFIX_LEN=11'
     expect_failure "list above bounds" "outside the expected 10..20" \
         "LISTS=\$(printf '%s\n' \"\$LISTS\" | sed 's/|100\$/|20/')"
-    expect_failure "unknown tier" "unknown tier 'x'" \
+    expect_failure "feed tier not in any list" "has tier 'x', which no list uses" \
         "FEEDS=\$(printf '%s\n' \"\$FEEDS\" | sed 's/^xl|/x|/')"
+    expect_failure "list tier without feeds" "tier 'xxl' is used by a list but has no feeds" \
+        "LISTS=\$(printf '%s\n%s\n' \"\$LISTS\" 'blocklist_x|blocklist_ga_x|s xxl|10|100')"
+    expect_failure "non-numeric list bound" "list 'blocklist' needs numeric bounds" \
+        "LISTS=\$(printf '%s\n' \"\$LISTS\" | sed 's/^blocklist|blocklist_ga|s|10|100/blocklist|blocklist_ga|s|10|1k/')"
     PREVIOUS_TXT="1.1.1.1"
     expect_failure "change above limit" "changed by" ""
     PREVIOUS_TXT=""

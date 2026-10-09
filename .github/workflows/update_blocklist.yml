@@ -16,7 +16,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Worst case is ~11 min: two download passes with retries.
+    # Worst case is ~14 min: two download passes, each up to ~6 min with
+    # curl's retries, plus the pause between them.
     timeout-minutes: 20
     permissions:
       contents: write
