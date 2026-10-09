@@ -19,6 +19,8 @@ GEN="$(dirname "$TESTS_DIR")/generate.sh"
 EXPECTED="$TESTS_DIR/expected"
 
 TMP=$(mktemp -d)
+# Block size the fixture config uses for the .json lists.
+JSON_TEST_BLOCK=$(sed -n 's/^JSON_BLOCK=//p' "$TESTS_DIR/config.sh")
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0
@@ -97,11 +99,15 @@ decode_json() {
     END {
         for (off = 1; off <= length(s); off += B) {
             c = substr(s, off, B)
-            if (off + B <= length(s) && length(c) != B) { print "short block"; exit 1 }
             depth = 0; key = ""
             while (match(c, /"[^"]*"|[{}:,]|[0-9]+/)) {
                 t = substr(c, RSTART, RLENGTH); c = substr(c, RSTART + RLENGTH)
-                if (t == "{") { depth++; K[depth] = key }
+                if (t == "{") {
+                    depth++; K[depth] = key
+                    # the router keeps only one copy of a group: never split one
+                    if (depth == 3 && (K[2] "." K[3]) in G) { print "group split"; exit 1 }
+                    if (depth == 3) G[K[2] "." K[3]] = 1
+                }
                 else if (t == "}") depth--
                 else if (t ~ /^"/) key = substr(t, 2, length(t) - 2)
                 else if (t ~ /^[0-9]+$/ && depth == 3 && K[2] != "#") print K[2] "." K[3] "." key
@@ -109,6 +115,30 @@ decode_json() {
             if (depth != 0) { print "unbalanced block"; exit 1 }
         }
     }' "$1"
+}
+
+# The JSON checker from generate.sh, run on its own against crafted files.
+sed -n "/^JSON_CHECK_AWK='\$/,/^'\$/p" "$GEN" | sed '1d;$d' > "$TMP/check.awk"
+printf '1.2.3.4\n1.2.5.6\n1.7.0.1\n5.6.7.8\n' > "$TMP/check.txt"
+
+# check_case <name> <expected message, or "" for a valid file> <block>...
+# Blocks are padded to 100 bytes; the last one is not padded.
+check_case() {
+    # POSIX sh has no local variables: use names no caller relies on.
+    cc_name="$1"; cc_msg="$2"; shift 2
+    cc_file="$TMP/check-$awk_name.json"
+    : > "$cc_file"
+    while [ "$#" -gt 1 ]; do printf '%-100s' "$1" >> "$cc_file"; shift; done
+    printf '%s' "$1" >> "$cc_file"
+    cc_out=$(PATH="$AWK_PATH" awk -v block=100 -f "$TMP/check.awk" "$TMP/check.txt" "$cc_file")
+    cc_rc=$?
+    if [ -z "$cc_msg" ]; then
+        if [ "$cc_rc" -eq 0 ]; then ok "json check accepts: $cc_name"; else not_ok "json check rejected $cc_name: $cc_out"; fi
+    elif [ "$cc_rc" -ne 0 ] && printf '%s' "$cc_out" | grep -qF -- "$cc_msg"; then
+        ok "json check rejects: $cc_name"
+    else
+        not_ok "json check: $cc_name: expected '$cc_msg', got rc=$cc_rc '$cc_out'"
+    fi
 }
 
 if [ "${1:-}" = "--update" ]; then
@@ -160,7 +190,7 @@ for awk_name in gawk mawk busybox; do
     json_ok=1
     for list in blocklist blocklist_l blocklist_xl; do
         if [ -f "$out/$list.json" ] && [ -f "$out/$list.txt" ]; then
-            decode_json "$out/$list.json" 200 | sort > "$out.$list.decoded"
+            decode_json "$out/$list.json" "$JSON_TEST_BLOCK" | sort > "$out.$list.decoded"
             sort "$out/$list.txt" > "$out.$list.sorted"
             cmp -s "$out.$list.decoded" "$out.$list.sorted" || json_ok=0
         else
@@ -172,6 +202,32 @@ for awk_name in gawk mawk busybox; do
     else
         not_ok "json: decoded entries differ from the .txt lists"
     fi
+
+    H='{"#":{"format":1,"entries":4}'
+    check_case "valid, one block" "" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "valid, first octet continued in the next block" "" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1}}}' '{"1":{"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "two objects in one block" "data after the object" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}}}{"5":{"6":{"7.8":1}}}'
+    check_case "junk after the object" "data after the object" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}xyz'
+    check_case "first octet repeated in a block" "first octet 1 repeated" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1}},"5":{"6":{"7.8":1}},"1":{"7":{"0.1":1}}}'
+    check_case "group split across blocks" "group 1.2 appears in two places" \
+        "$H"',"1":{"2":{"3.4":1}}}' '{"1":{"2":{"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "header count wrong" "header says 5 entries" \
+        '{"#":{"format":1,"entries":5},"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "entry not in the list" "entry 1.2.3.9 is not in the list" \
+        "$H"',"1":{"2":{"3.9":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "value other than 1" "has a value other than 1" \
+        "$H"',"1":{"2":{"3.4":2,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "header missing" "does not start an object" \
+        '"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1}}}'
+    check_case "truncated block" "block 1" \
+        "$H"',"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}},"5":{"6":{"7.8":1'
+    check_case "header in second block" "misplaced header" \
+        '{"1":{"2":{"3.4":1,"5.6":1},"7":{"0.1":1}}}' "$H"',"5":{"6":{"7.8":1}}}'
 
     if run_gen "$out" && grep -q '(0% change)' "$out.log" &&
         diff -r "$EXPECTED" "$out" > /dev/null; then

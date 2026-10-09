@@ -526,23 +526,86 @@ END {
 }
 '
 
-# Check a .json list: header with the right entry count, one entry per
-# list line, and every block a self-contained object of at most `block`
-# bytes (starts with "{", braces balance to zero at its end).
+# Check a .json list the way RouterOS reads it: block by block, each block
+# exactly one JSON object followed only by padding. Reads the list's .txt
+# first, then the .json; every decoded entry must be in the .txt, appear
+# once, and the totals must match the header. Rejects anything the router
+# would load wrongly: a repeated first octet within a block (later key
+# wins), a second-octet group in two blocks (the router keeps only one),
+# stray characters, a misplaced header. Prints the reason and exits 1.
 # shellcheck disable=SC2016  # awk program, not shell
 JSON_CHECK_AWK='
+function fail(why) { print why; bad = 1; exit 1 }
+FNR == NR { want[$0] = 1; nwant++; next }
 { s = s $0 }
 END {
-    hdr = "{\"#\":{\"format\":1,\"entries\":" n "}"
-    if (index(s, hdr) != 1) { print "bad header"; exit 1 }
-    t = substr(s, length(hdr) + 1)
-    if (gsub(/":1/, "", t) != n) { print "entry count differs"; exit 1 }
+    if (bad) exit 1
+    if (length(s) == 0) fail("empty file")
+    nblk = 0; count = 0; fmt = ""; ents = ""
     for (off = 1; off <= length(s); off += block) {
+        nblk++
         c = substr(s, off, block)
-        if (substr(c, 1, 1) != "{") { print "block at " off - 1 " does not start an object"; exit 1 }
-        o = c; cl = c
-        if (gsub(/[{]/, "", o) != gsub(/[}]/, "", cl)) { print "block at " off - 1 " is not self-contained"; exit 1 }
+        if (substr(c, 1, 1) != "{") fail("block " nblk " does not start an object")
+        np = split(c, P, "\"")
+        depth = 0; closed = 0; delete o1seen
+        for (k = 1; k <= np; k++) {
+            if (k % 2 == 0) {
+                if (closed || depth < 1) fail("block " nblk ": text outside the object")
+                key = P[k]; nxt = P[k + 1]
+                if (substr(nxt, 1, 2) == ":{") {
+                    name[depth + 1] = key
+                } else if (depth == 3 && name[2] != "#") {
+                    if (substr(nxt, 1, 2) != ":1" || substr(nxt, 3, 1) !~ /^[,}]$/) fail("block " nblk ": entry " key " has a value other than 1")
+                    e = name[2] "." name[3] "." key
+                    if (!(e in want)) fail("block " nblk ": entry " e " is not in the list")
+                    if (e in got) fail("block " nblk ": entry " e " appears twice")
+                    got[e] = 1; count++
+                } else if (depth == 2 && name[2] == "#" && nblk == 1) {
+                    v = substr(nxt, 2); sub(/[^0-9].*$/, "", v)
+                    if (key == "format") fmt = v
+                    else if (key == "entries") ents = v
+                    else fail("unknown header field " key)
+                } else {
+                    fail("block " nblk ": unexpected key " key)
+                }
+                seg = substr(nxt, 2)
+            } else if (k == 1) {
+                seg = P[k]
+            } else {
+                continue    # already handled together with the key before it
+            }
+            m = length(seg)
+            for (i = 1; i <= m; i++) {
+                ch = substr(seg, i, 1)
+                if (closed) {
+                    if (ch != " ") fail("block " nblk ": data after the object")
+                } else if (ch == "{") {
+                    depth++
+                    if (depth == 2) {
+                        if (name[2] in o1seen) fail("block " nblk ": first octet " name[2] " repeated")
+                        o1seen[name[2]] = 1
+                        if (name[2] == "#" && (nblk != 1 || hdrseen++)) fail("misplaced header")
+                    }
+                    if (depth == 3) {
+                        g = name[2] "." name[3]
+                        if (g in grp) fail("second-octet group " g " appears in two places")
+                        grp[g] = 1
+                    }
+                    if (depth > 3) fail("block " nblk ": nested too deep")
+                } else if (ch == "}") {
+                    depth--
+                    if (depth < 0) fail("block " nblk ": unbalanced braces")
+                    if (depth == 0) closed = 1
+                } else if (ch !~ /^[:,0-9]$/) {
+                    fail("block " nblk ": unexpected character " ch)
+                }
+            }
+        }
+        if (!closed) fail("block " nblk " is not a complete object")
     }
+    if (fmt != "1") fail("header missing or format is not 1")
+    if (ents != nwant) fail("header says " ents " entries, list has " nwant)
+    if (count != nwant) fail("decoded " count " entries, list has " nwant)
 }
 '
 
@@ -594,7 +657,7 @@ check_list() {
     if [ "$n" -lt "$min" ] || [ "$n" -gt "$max" ]; then
         die "$list: $n entries, outside the expected $min..$max"
     fi
-    if ! why=$(awk -v n="$n" -v block="$JSON_BLOCK" "$JSON_CHECK_AWK" "$STAGE/$list.json"); then
+    if ! why=$(awk -v block="$JSON_BLOCK" "$JSON_CHECK_AWK" "$txt" "$STAGE/$list.json"); then
         die "$list.json: $why"
     fi
 
