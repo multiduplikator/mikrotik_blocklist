@@ -32,6 +32,27 @@ CURL_RETRY_DELAY=5          # doubles after each attempt
 CURL_RETRY_MAX_TIME=300     # total budget for one feed, including retries
 RETRY_PASS_DELAY=60         # pause before a second pass over failed feeds
 
+# Output sanity checks. A run that violates any of them aborts before the
+# existing lists are touched.
+MAX_DELTA_PCT=30            # max change in entries vs the current lists
+MIN_PREFIX_LEN=10           # no entry may be wider than this (e.g. a /8)
+
+# ============================================================
+# LISTS
+# ============================================================
+# Format: <list>|<ga_list>|<tiers>|<min_entries>|<max_entries>
+#
+# list:    base name of the .txt and .rsc outputs
+# ga_list: base name of the global-array .rsc output
+# tiers:   space-separated feed tiers included in this list
+
+LISTS=$(cat <<'EOF'
+blocklist|blocklist_ga|s|8000|60000
+blocklist_l|blocklist_ga_l|s l|15000|80000
+blocklist_xl|blocklist_ga_xl|s l xl|40000|150000
+EOF
+)
+
 # ============================================================
 # FEEDS
 # ============================================================
@@ -255,6 +276,109 @@ BEGIN {
 }
 '
 
+# Merge sorted "start end" ranges (overlapping or adjacent ones are
+# joined) and write each merged range as the minimal set of CIDR blocks to
+# txt, rsc and ga. Exits 3 if any block is wider than /minpfx.
+# shellcheck disable=SC2016  # awk program, not shell
+BUILD_AWK='
+BEGIN {
+    # S[b] = number of addresses in a block with b host bits (2^b).
+    v = 1
+    for (i = 0; i <= 32; i++) { S[i] = v; v = v * 2 }
+    printf "" > txt
+    print "/ip firewall address-list" > rsc
+    print ":global newips [:toarray \"\"]" > ga
+    too_wide = 0
+}
+function ip(n) {
+    return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
+}
+function emit(s, e,   b, sz, addr) {
+    while (s <= e) {
+        for (b = 0; b < 32; b++) {
+            sz = S[b+1]
+            if ((s % sz) || s+sz-1 > e) break
+        }
+        sz = S[b]
+        addr = (b == 0) ? ip(s) : ip(s) "/" (32-b)
+        if (32-b < minpfx) {
+            print "entry " addr " is wider than /" minpfx > "/dev/stderr"
+            too_wide++
+        }
+        print addr > txt
+        print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" > rsc
+        print ":set newips ($newips,\"" addr "\")" > ga
+        s += sz
+    }
+}
+NR == 1 { cs = $1; ce = $2; next }
+$1 <= ce+1 { if ($2 > ce) ce = $2; next }
+{ emit(cs, ce); cs = $1; ce = $2 }
+END {
+    if (NR) emit(cs, ce)
+    if (too_wide) exit 3
+}
+'
+
+# Build one list into $STAGE from the ranges of the given feed tiers.
+build_list() {
+    list="$1"; ga_list="$2"; tiers="$3"
+    set --
+    for f in "$RANGES"/*; do
+        case " $tiers " in
+            *" ${f##*.} "*) set -- "$@" "$f" ;;
+        esac
+    done
+    [ "$#" -gt 0 ] || die "$list: no ranges for tiers '$tiers'"
+    # sort writes to a file rather than into the awk pipe: POSIX sh has no
+    # pipefail, so a failing sort would otherwise go unnoticed.
+    sort -n "$@" > "$WORK/$list.sorted" || die "$list: sort failed"
+    awk -v txt="$STAGE/$list.txt" -v rsc="$STAGE/$list.rsc" \
+        -v ga="$STAGE/$ga_list.rsc" -v minpfx="$MIN_PREFIX_LEN" \
+        "$BUILD_AWK" "$WORK/$list.sorted" || die "$list: build failed"
+}
+
+# Validate one staged list: shape of every line, consistent entry counts
+# across the three files, absolute bounds, and change vs the current list.
+check_list() {
+    list="$1"; ga_list="$2"; min="$3"; max="$4"
+    txt="$STAGE/$list.txt"; rsc="$STAGE/$list.rsc"; ga="$STAGE/$ga_list.rsc"
+
+    if grep -Evq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$txt"; then
+        die "$list.txt: unexpected line(s)"
+    fi
+    if [ "$(head -n 1 "$rsc")" != "/ip firewall address-list" ] ||
+        tail -n +2 "$rsc" | grep -Evq '^add list=new_blocklist address="[0-9./]+" comment="blocklist"$'; then
+        die "$list.rsc: unexpected line(s)"
+    fi
+    # shellcheck disable=SC2016  # literal $newips in the pattern
+    if [ "$(head -n 1 "$ga")" != ':global newips [:toarray ""]' ] ||
+        tail -n +2 "$ga" | grep -Evq '^:set newips \(\$newips,"[0-9./]+"\)$'; then
+        die "$ga_list.rsc: unexpected line(s)"
+    fi
+
+    n=$(($(wc -l < "$txt")))
+    if [ "$(($(wc -l < "$rsc")))" -ne $((n + 1)) ] || [ "$(($(wc -l < "$ga")))" -ne $((n + 1)) ]; then
+        die "$list: entry counts differ between .txt and .rsc files"
+    fi
+    if [ "$n" -lt "$min" ] || [ "$n" -gt "$max" ]; then
+        die "$list: $n entries, outside the expected $min..$max"
+    fi
+
+    prev="$OUTDIR/$list.txt"
+    if [ -s "$prev" ]; then
+        old=$(($(wc -l < "$prev")))
+        pct=$(awk -v o="$old" -v n="$n" 'BEGIN { d = (n - o) / o * 100; if (d < 0) d = -d; printf "%d", d + 0.5 }')
+        log "  $list: $old -> $n entries (${pct}% change)"
+        if [ "$pct" -gt "$MAX_DELTA_PCT" ]; then
+            die "$list: changed by ${pct}% (limit ${MAX_DELTA_PCT}%)"
+        fi
+    else
+        log "  $list: $n entries (no previous list)"
+    fi
+    summary "| $list | $n |"
+}
+
 # ============================================================
 # SCRIPT
 # ============================================================
@@ -263,8 +387,10 @@ BEGIN {
 OUTDIR="$(cd "$(dirname "$0")" && pwd)"
 
 WORK=""
+STAGE=""
 cleanup() {
     if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+    if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -275,6 +401,9 @@ RAW="$WORK/raw"
 FEED="$WORK/feed"
 RANGES="$WORK/ranges"
 mkdir "$RAW" "$FEED" "$RANGES"
+# New lists are staged next to the old ones and only moved into place
+# once all of them pass the checks.
+STAGE=$(mktemp -d "$OUTDIR/.generate.XXXXXX")
 
 validate_config
 
@@ -322,73 +451,27 @@ if [ -n "$failed" ]; then
 fi
 
 log "Building lists..."
+summary ""
+summary "| List | Entries |"
+summary "|---|---:|"
+while IFS='|' read -r list ga_list tiers min max; do
+    [ -n "$list" ] || continue
+    build_list "$list" "$ga_list" "$tiers"
+done <<EOF
+$LISTS
+EOF
 
-build_list() {
-    base="$1"; shift
-    outbase="$OUTDIR/$base"
+log "Checking lists..."
+while IFS='|' read -r list ga_list tiers min max; do
+    [ -n "$list" ] || continue
+    check_list "$list" "$ga_list" "$min" "$max"
+done <<EOF
+$LISTS
+EOF
 
-    sort -n "$@" | awk \
-        -v base="$base" \
-        -v outbase="$outbase" \
-        -v outdir="$OUTDIR" '
-    BEGIN {
-        v = 1
-        for (i=0; i<=32; i++) { P[i]=v; v=v*2 }
-        rsc = outbase ".rsc"
-        if (base == "blocklist")         ga_suffix = ""
-        else if (base == "blocklist_l")  ga_suffix = "_l"
-        else if (base == "blocklist_xl") ga_suffix = "_xl"
-        else                              ga_suffix = "_" base
-        ga = outdir "/blocklist_ga" ga_suffix ".rsc"
-        txt = outbase ".txt"
-        printf "" > txt
-        print "/ip firewall address-list" > rsc
-        print ":global newips [:toarray \"\"]" > ga
-        count = 0
-    }
-    function ip(n) {
-        return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
-    }
-    function emit(s, e,   b, sz, addr) {
-        while (s <= e) {
-            for (b=0; b<32; b++) {
-                sz = P[b+1]
-                if ((s % sz) || s+sz-1 > e) break
-            }
-            sz = P[b]
-            addr = (b==0) ? ip(s) : ip(s) "/" (32-b)
-            print addr >> txt
-            print "add list=new_blocklist address=\"" addr "\" comment=\"blocklist\"" >> rsc
-            print ":set newips ($newips,\"" addr "\")" >> ga
-            count++
-            s += sz
-        }
-    }
-    NR==1 { cs=$1; ce=$2; next }
-    $1 <= ce+1 { if ($2>ce) ce=$2; next }
-    { emit(cs,ce); cs=$1; ce=$2 }
-    END {
-        if(NR) emit(cs,ce)
-        print "  " base ": " count " entries" > "/dev/stderr"
-    }'
-}
-
-# A bare `wait` under `set -e` does NOT abort on a failed background job
-# (it returns 0), so a build_list failure would silently ship partial
-# files. Capture the exit status explicitly and fail loudly.
-build_list "blocklist"     "$RANGES"/*.s &
-pid_s=$!
-build_list "blocklist_l"   "$RANGES"/*.s "$RANGES"/*.l &
-pid_l=$!
-build_list "blocklist_xl"  "$RANGES"/*.s "$RANGES"/*.l "$RANGES"/*.xl &
-pid_xl=$!
-build_fail=0
-wait "$pid_s"  || build_fail=1
-wait "$pid_l"  || build_fail=1
-wait "$pid_xl" || build_fail=1
-if [ "$build_fail" -ne 0 ]; then
-    echo "  ! build_list failed; aborting to avoid committing partial lists." >&2
-    exit 1
-fi
-
-echo "Done!"
+# Every check passed: replace the lists. STAGE lives inside OUTDIR, so
+# each mv is an atomic rename.
+for f in "$STAGE"/*; do
+    mv "$f" "$OUTDIR/"
+done
+log "Done!"
