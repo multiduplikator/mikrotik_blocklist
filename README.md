@@ -281,7 +281,7 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
 
 2. **Safe failure:** the update aborts before changing anything if the file is missing, unreadable or not valid JSON, if the header's entry count does not match what was loaded, or if the list would change by more than `maxChange` percent. The current list then stays as it is. If a single entry can't be added, the others still are, and the run ends with a warning.
 
-3. **Performance:** measured on a CCR2004-16G-2S+ with RouterOS 7.24.5 and the large list (~36k entries). Updates take about **21–24 s**; one that kept 33,368 entries, removed 3,199 and added 3,004 took 23.5 s. The legacy `.rsc` scripts took 2 min 33 s for a comparable update. Of the new script's time, loading the file takes about 0.3 s, and checking every current entry about 19 s.
+3. **Performance:** measured on a CCR2004-16G-2S+ with RouterOS 7.24.5 and the large list (~36k entries). Updates take about **21–24 s**; one that kept 33,368 entries, removed 3,199 and added 3,004 took 23.5 s. The legacy `.rsc` scripts took 2 min 33 s for a comparable update.
 
 4. **Why JSON blocks:** RouterOS arrays are copied whenever they are modified, so building a 36k-entry array one entry at a time is slow (measured: 26 s by appending, 6.5 min as a keyed array). `:deserialize` builds each block's keyed array natively in one call. The blocks are 32 KB because `/file read` reads at most that much per call.
 
