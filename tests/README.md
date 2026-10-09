@@ -65,3 +65,17 @@ Offline mode is also handy for checking a feed before adding it to `FEEDS`:
 3. Run `BLOCKLIST_CONFIG=myconfig.sh sh generate.sh`.
 
 The per-feed range counts it prints help you choose a sensible `min_ranges`.
+
+## RouterOS self-test
+
+[`routeros-selftest.rsc`](routeros-selftest.rsc) tests the two RouterOS scripts from the main README on a real router. Run it with `/import file-name=routeros-selftest.rsc`.
+
+It reads the source of your installed `blocklist-dl` and `blocklist-diff` scripts and redirects them to a scratch address-list and scratch file. It refuses to run if any reference to `prod_blocklist` is left. It then checks:
+
+- the normal update: keep, remove, add, CIDR entries, a first octet that continues into the next block
+- a rerun and a first run
+- truncated, corrupt, empty and missing files, and an unknown format version
+- a rejected entry, an entry wider than /10, and a list change above the limit
+- a failed download, and a real download with certificate verification
+
+Every case also checks that the logging rule is back in its previous state.

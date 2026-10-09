@@ -111,21 +111,21 @@ Downloads the list as `blocklist_l.json`. Use `blocklist.json` or `blocklist_xl.
 
 :log info "blocklist-DL: started"
 :do {
-    /tool fetch url=$url dst-path=$file
+    # Verify GitHub's certificate. Uses RouterOS's built-in root CAs
+    # (7.19+, see Important Notes); on older versions import a CA bundle.
+    /tool fetch url=$url dst-path=$file check-certificate=yes-without-crl
 } on-error={
-    :log error "blocklist-DL: download failed, keeping the previous file"
+    :log error "blocklist-DL: download failed; the update script will reject an incomplete file"
     :error "blocklist download failed"
 }
 :log info ("blocklist-DL: finished, " . [/file get $file size] . " bytes")
 ```
 
-A failed or truncated download can't do harm: Script 2 checks the file before it changes anything.
-
 ### Script 2: Differential Update
 
 **Policy:** `read, write, test`  
 **Schedule:** Every 3 hours, 5 minutes after the download  
-**Requires:** RouterOS 7.13 or newer (`:deserialize`)
+**Requires:** RouterOS 7 with `:deserialize`. Tested on 7.24.5; older 7.x versions are untested.
 
 The script updates `prod_blocklist` in place. It removes entries that are no longer listed and adds new ones, so the list is active at every moment and RouterOS never holds a second copy of it.
 
@@ -133,6 +133,11 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
 :local file "blocklist_l.json"
 :local listName "prod_blocklist"
 :local block 32768
+# Safety limits: abort if the list would grow or shrink by more than
+# maxChange percent (raise it once when switching to another tier), and
+# never add an entry wider than /minPrefix.
+:local maxChange 30
+:local minPrefix 10
 
 :log info "blocklist-DIFF: === STARTED ==="
 :local startTime [:timestamp]
@@ -151,25 +156,30 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
 :local bl [:toarray ""]
 :local format 0
 :local expected -1
-:for off from=0 to=($size - 1) step=$block do={
-    :local r [/file read file=$file offset=$off chunk-size=$block as-value]
-    :local data ($r->"data")
-    :if ([:typeof $data] = "nothing") do={ :set data $r }
-    :foreach o1,g in=[:deserialize from=json options=json.no-string-conversion $data] do={
-        :if ($o1 = "#") do={
-            :set format ($g->"format")
-            :set expected ($g->"entries")
-        } else={
-            :if ([:typeof ($bl->$o1)] = "nothing") do={
-                :set ($bl->$o1) $g
+:do {
+    :for off from=0 to=($size - 1) step=$block do={
+        :local r [/file read file=$file offset=$off chunk-size=$block as-value]
+        :local data ($r->"data")
+        :if ([:typeof $data] = "nothing") do={ :set data $r }
+        :foreach o1,g in=[:deserialize from=json options=json.no-string-conversion $data] do={
+            :if ($o1 = "#") do={
+                :set format ($g->"format")
+                :set expected ($g->"entries")
             } else={
-                # first octet continues from the previous block: merge
-                :local b1 ($bl->$o1)
-                :foreach o2,rs in=$g do={ :set ($b1->$o2) $rs }
-                :set ($bl->$o1) $b1
+                :if ([:typeof ($bl->$o1)] = "nothing") do={
+                    :set ($bl->$o1) $g
+                } else={
+                    # first octet continues from the previous block: merge
+                    :local b1 ($bl->$o1)
+                    :foreach o2,rs in=$g do={ :set ($b1->$o2) $rs }
+                    :set ($bl->$o1) $b1
+                }
             }
         }
     }
+} on-error={
+    :log error "blocklist-DIFF: $file is unreadable or not valid JSON (incomplete download?), aborting"
+    :error "blocklist file unreadable"
 }
 :local total 0
 :foreach o1,g in=$bl do={ :foreach o2,rs in=$g do={ :set total ($total + [:len $rs]) } }
@@ -177,7 +187,16 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
     :log error "blocklist-DIFF: $file invalid (format $format, $total of $expected entries), aborting"
     :error "blocklist file invalid"
 }
-:log info "blocklist-DIFF: Loaded $total entries"
+:local current [:len [/ip firewall address-list find list=$listName]]
+:if ($current > 0) do={
+    :local change ($total - $current)
+    :if ($change < 0) do={ :set change (0 - $change) }
+    :if (($change * 100) > ($current * $maxChange)) do={
+        :log error "blocklist-DIFF: list would change from $current to $total entries (limit $maxChange%), aborting"
+        :error "blocklist change too large"
+    }
+}
+:log info "blocklist-DIFF: Loaded $total entries, list has $current"
 
 # ----------------------------------------------------------------------------
 # STEP 2: Walk the current list. Entries still listed are kept and ticked
@@ -186,9 +205,17 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
 :local kept 0
 :local removed 0
 :local added 0
+:local failed 0
+:local skipped 0
 
-# Disable logging to prevent a flood of add/remove messages
-/system logging disable 0
+# Silence the info logging rule while the list changes (avoids thousands
+# of add/remove messages); its previous state is restored afterwards.
+:local logRule [:pick [/system logging find where topics~"info"] 0]
+:local logWasOff true
+:if ([:typeof $logRule] = "id") do={
+    :set logWasOff [/system logging get $logRule disabled]
+    /system logging disable $logRule
+}
 
 :do {
     /ip firewall address-list
@@ -200,7 +227,8 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
         :local p2 [:pick $s ($i1 + 1) $i2]
         :local rest [:pick $s ($i2 + 1) [:len $s]]
         :if ([:typeof ((($bl->$p1)->$p2)->$rest)] != "nothing") do={
-            # still listed: keep, and tick it off (only small arrays are copied)
+            # still listed: keep it and tick it off. This copies the
+            # first-octet array, not the whole list.
             :local b1 ($bl->$p1)
             :local b2 ($b1->$p2)
             :set ($b2->$rest)
@@ -216,40 +244,55 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
     :foreach o1,g in=$bl do={
         :foreach o2,rs in=$g do={
             :foreach rest,v in=$rs do={
-                add list=$listName address=($o1 . "." . $o2 . "." . $rest)
-                :set added ($added + 1)
+                :local slash [:find $rest "/"]
+                :if (([:typeof $slash] != "nil") && ([:tonum [:pick $rest ($slash + 1) [:len $rest]]] < $minPrefix)) do={
+                    :set skipped ($skipped + 1)
+                } else={
+                    # one bad entry must not stop the others
+                    :do {
+                        add list=$listName address=($o1 . "." . $o2 . "." . $rest)
+                        :set added ($added + 1)
+                    } on-error={ :set failed ($failed + 1) }
+                }
             }
         }
     }
 } on-error={
-    /system logging enable 0
+    :if (([:typeof $logRule] = "id") && !$logWasOff) do={ /system logging enable $logRule }
     :log error "blocklist-DIFF: failed after removing $removed and adding $added entries"
     :error "blocklist update failed"
 }
 
-/system logging enable 0
+:if (([:typeof $logRule] = "id") && !$logWasOff) do={ /system logging enable $logRule }
 :set bl
 
 :local finalCount [:len [/ip firewall address-list find list=$listName]]
 :log info "blocklist-DIFF: === COMPLETED ==="
 :log info "blocklist-DIFF: Kept=$kept, Removed=$removed, Added=$added, Total=$finalCount"
-:if ($finalCount != $total) do={
-    :log warning "blocklist-DIFF: list has $finalCount entries, expected $total"
+:if (($failed + $skipped) > 0) do={
+    :log warning "blocklist-DIFF: $failed entries could not be added, $skipped skipped as wider than /$minPrefix"
+}
+:if ($finalCount != ($total - $failed - $skipped)) do={
+    :log warning ("blocklist-DIFF: list has " . $finalCount . " entries, expected " . ($total - $failed - $skipped))
 }
 :log info ("blocklist-DIFF: Duration=" . ([:timestamp] - $startTime))
 ```
 
 ### Important Notes
 
-1. **First run:** on initial setup, `prod_blocklist` doesn't exist yet. The script simply adds all entries.
+1. **First run:** on initial setup, `prod_blocklist` doesn't exist yet. The script simply adds all entries; the size check only applies once the list exists.
 
-2. **Safe failure:** a missing, truncated or corrupted file is detected in step 1, before anything changes. The header's entry count must match what was loaded. The current list then stays as it is.
+2. **Safe failure:** the update aborts before changing anything if the file is missing, unreadable or not valid JSON, if the header's entry count does not match what was loaded, or if the list would change by more than `maxChange` percent. The current list then stays as it is. If a single entry can't be added, the others still are, and the run ends with a warning.
 
 3. **Performance:** measured on a CCR2004-16G-2S+ with RouterOS 7.24.5 and the large list (~36k entries). A full update that kept 33,368 entries, removed 3,199 and added 3,004 took **23.5 s**. The legacy `.rsc` scripts took 2 min 33 s for a comparable update. Of the new script's time, loading the file takes about 0.3 s, and checking every current entry about 19 s.
 
 4. **Why JSON blocks:** RouterOS arrays are copied whenever they are modified, so building a 36k-entry array one entry at a time is slow (measured: 26 s by appending, 6.5 min as a keyed array). `:deserialize` builds each block's keyed array natively in one call. The blocks are 32 KB because `/file read` reads at most that much per call.
 
-5. **Logging:** the script disables logging rule 0 only while the list is being changed. This avoids thousands of "address-list entry added/removed" messages, and logging is re-enabled even if the update fails.
+5. **Logging:** the script silences the `info` logging rule only while the list is being changed, to avoid thousands of "address-list entry added/removed" messages. Afterwards, or if the update fails, the rule is restored to the state it had before.
+
+6. **Security:** Script 1 verifies GitHub's TLS certificate (`check-certificate=yes-without-crl`). RouterOS 7.21+ trusts its built-in root CAs for `fetch` by default (`/certificate/settings print` shows `builtin-trust-store`). On 7.19 and 7.20 enable them with `/certificate/settings/set builtin-trust-anchors=trusted`; on older versions import a CA bundle. As a second line of defence, Script 2 never adds entries wider than `/minPrefix` and refuses list changes larger than `maxChange` percent.
+
+7. **Self-test:** [`tests/routeros-selftest.rsc`](tests/routeros-selftest.rsc) runs your installed scripts against a scratch list and checks the normal update and the failure cases above, without touching `prod_blocklist`.
 
 <details>
 <summary>Legacy scripts (<code>blocklist_ga*.rsc</code>)</summary>
