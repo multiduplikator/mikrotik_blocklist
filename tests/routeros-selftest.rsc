@@ -91,12 +91,21 @@
 :if (([:typeof [:find $diffSrc "\"prod_blocklist\""]] = "nil") || ([:typeof [:find $diffSrc "\"blocklist_l.json\""]] = "nil")) do={
     :error "selftest: $diffScript does not contain \"prod_blocklist\" and \"blocklist_l.json\" -- adjust the test"
 }
-:set diffSrc [$replace $diffSrc "\"prod_blocklist\"" ("\"" . $TL . "\"")]
-:set diffSrc [$replace $diffSrc "\"blocklist_l.json\"" ("\"" . $TF . "\"")]
+:local q "\""
+# RouterOS does not process \" escapes in arguments to script functions,
+# so every string with quotes is built here and passed as a variable.
+:local pProd ($q . "prod_blocklist" . $q)
+:local pFile ($q . "blocklist_l.json" . $q)
+:local pTL ($q . $TL . $q)
+:local pTF ($q . $TF . $q)
+:local pUrl ("/main/blocklist_l.json" . $q)
+:local pUrlBad ("/main/selftest-does-not-exist.json" . $q)
+:set diffSrc [$replace $diffSrc $pProd $pTL]
+:set diffSrc [$replace $diffSrc $pFile $pTF]
 # download with the real URL into the scratch file
-:local dlReal [$replace $dlSrc "\"blocklist_l.json\"" ("\"" . $TF . "\"")]
+:local dlReal [$replace $dlSrc $pFile $pTF]
 # download from a URL that does not exist
-:local dlBad [$replace $dlReal "/main/blocklist_l.json\"" "/main/selftest-does-not-exist.json\""]
+:local dlBad [$replace $dlReal $pUrl $pUrlBad]
 :if (([:typeof [:find $diffSrc "prod_blocklist"]] != "nil") || ([:typeof [:find $diffSrc "blocklist_l.json"]] != "nil") || ([:typeof [:find $dlReal "\"blocklist_l.json\""]] != "nil") || ([:typeof [:find $dlBad "blocklist_l.json"]] != "nil")) do={
     :error "selftest: could not redirect the scripts to scratch names -- aborting, nothing was run"
 }
@@ -151,7 +160,9 @@
     :if ($t = "T4") do={ :set content ($b1 . [:pick $pad 0 (32768 - [:len $b1])]) }
     :if ($t = "T5") do={ :set content ($b1 . [:pick $pad 0 (32768 - [:len $b1])] . "{\"198\":{\"18\":{\"0.1\":1}") }
     :if ($t = "T6") do={
-        :local f2 [$replace $b1 "\"format\":1" "\"format\":2"]
+        :local fmt1 ($q . "format" . $q . ":1")
+        :local fmt2 ($q . "format" . $q . ":2")
+        :local f2 [$replace $b1 $fmt1 $fmt2]
         :set content ($f2 . [:pick $pad 0 (32768 - [:len $f2])] . $b2)
     }
     [$setList $TL $before]
@@ -161,19 +172,30 @@
     :if ([$check $ok ($name . ": aborted, list untouched")]) do={ :set pass ($pass + 1) } else={ :set fail ($fail + 1); :put "        result=$r" }
 }
 
-# T9: an entry the router rejects (invalid address): the others are
+# T9: an entry the router rejects (invalid prefix): the others are
 # still added, the run completes, logging restored
-:local b2bad [$replace $b2 "\"2.1\":1" "\"2.300\":1"]
+:local e21 ($q . "2.1" . $q . ":1")
+# 192.0.2.1/33 is neither a valid prefix nor a valid DNS name
+:local e2bad ($q . "2.1/33" . $q . ":1")
+:local b2bad [$replace $b2 $e21 $e2bad]
 [$writeFile $TF ($b1 . [:pick $pad 0 (32768 - [:len $b1])] . $b2bad)]
 [$setList $TL $before]
 :set r [$run $diffSrc]
 :set ok (($r = "ok") && [$listIs $TL $want9] && ([$logState] = $logBefore))
-:if ([$check $ok "T9 one entry rejected by RouterOS: the other 5 still applied"]) do={ :set pass ($pass + 1) } else={ :set fail ($fail + 1); :put "        result=$r" }
+:if ([$check $ok "T9 one entry rejected by RouterOS: the other 5 still applied"]) do={ :set pass ($pass + 1) } else={
+    :set fail ($fail + 1)
+    :put "        result=$r, list now:"
+    :foreach id in=[/ip firewall address-list find list=$TL] do={ :put ("          " . [/ip firewall address-list get $id address]) }
+}
 
 # T10: an entry wider than /10 is skipped (starts from the 6 valid
 # entries, so the change stays below the 30% limit)
-:local b1w [$replace $b1 "\"entries\":6" "\"entries\":7"]
-:local b2w [$replace $b2 "\"18\":{\"0.1\":1}" "\"18\":{\"0.1\":1},\"0\":{\"0.0/8\":1}"]
+:local n6 ($q . "entries" . $q . ":6")
+:local n7 ($q . "entries" . $q . ":7")
+:local g18 ($q . "18" . $q . ":{" . $q . "0.1" . $q . ":1}")
+:local g18w ($g18 . "," . $q . "0" . $q . ":{" . $q . "0.0/8" . $q . ":1}")
+:local b1w [$replace $b1 $n6 $n7]
+:local b2w [$replace $b2 $g18 $g18w]
 [$writeFile $TF ($b1w . [:pick $pad 0 (32768 - [:len $b1w])] . $b2w)]
 [$setList $TL $want]
 :set r [$run $diffSrc]

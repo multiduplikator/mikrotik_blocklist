@@ -227,13 +227,8 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
         :local p2 [:pick $s ($i1 + 1) $i2]
         :local rest [:pick $s ($i2 + 1) [:len $s]]
         :if ([:typeof ((($bl->$p1)->$p2)->$rest)] != "nothing") do={
-            # still listed: keep it and tick it off. This copies the
-            # first-octet array, not the whole list.
-            :local b1 ($bl->$p1)
-            :local b2 ($b1->$p2)
-            :set ($b2->$rest)
-            :set ($b1->$p2) $b2
-            :set ($bl->$p1) $b1
+            # still listed: keep it, and tick it off in $bl
+            :set ((($bl->$p1)->$p2)->$rest)
             :set kept ($kept + 1)
         } else={
             remove $id
@@ -244,8 +239,10 @@ The script updates `prod_blocklist` in place. It removes entries that are no lon
     :foreach o1,g in=$bl do={
         :foreach o2,rs in=$g do={
             :foreach rest,v in=$rs do={
+                :local plen 32
                 :local slash [:find $rest "/"]
-                :if (([:typeof $slash] != "nil") && ([:tonum [:pick $rest ($slash + 1) [:len $rest]]] < $minPrefix)) do={
+                :if ([:typeof $slash] != "nil") do={ :set plen [:tonum [:pick $rest ($slash + 1) [:len $rest]]] }
+                :if (([:typeof $plen] = "num") && ($plen < $minPrefix)) do={
                     :set skipped ($skipped + 1)
                 } else={
                     # one bad entry must not stop the others
