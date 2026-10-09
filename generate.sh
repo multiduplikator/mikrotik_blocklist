@@ -1,5 +1,5 @@
 #!/bin/sh
-# Blocklist aggregator - gawk version
+# Blocklist aggregator
 #
 # Based on multiduplikator's README script, extended (via the Davie3 fork)
 # with:
@@ -9,13 +9,9 @@
 #   - DShield CIDR preprocess with a format-drift guard
 #   - Broader reserved-range filter (CGNAT, link-local, multicast+reserved)
 #
-# Requires: curl, GNU gawk (bit-ops lshift/rshift/and/compl), sed, grep.
-#   sort is plain POSIX. The ONLY hard dependency is GNU gawk -- the awk
-#   programs use GNU extensions (lshift, rshift, and, compl) that mawk and
-#   busybox awk do NOT implement. So this runs on any minimal/slim image
-#   (ubuntu-slim, debian-slim, alpine+gawk) as long as gawk is installed;
-#   it will NOT run on a stock image whose default awk is mawk/busybox.
-#   On ubuntu-latest gawk is preinstalled; on slim images apt-install it.
+# Requires: curl, sed, grep, sort, and a POSIX awk. The awk programs use
+#   only integer arithmetic (multiply, divide, modulo) — no GNU extensions.
+#   Works with mawk, busybox awk, or gawk.
 
 set -eu
 export LC_ALL=C
@@ -187,9 +183,10 @@ echo "Extracting ranges..."
 #   >= 3758096384               = 224.0.0.0/3 (multicast + reserved)
 #   879870596                   = 52.113.194.132   (whitelist: Teams)
 #   599449625                   = 35.186.224.25    (whitelist: Teams)
-gawk '
+awk '
 BEGIN {
-    for (i = 0; i <= 32; i++) P[i] = lshift(1, 32-i)
+    pw = 1
+    for (i = 0; i <= 32; i++) { P[i] = pw; pw = pw * 2 }
     cache = "'"$CACHE"'/"
 }
 {
@@ -198,15 +195,15 @@ BEGIN {
         addr = substr(line, RSTART, RLENGTH)
         line = substr(line, RSTART + RLENGTH)
 
-        n = split(addr, p, "/")
-        split(p[1], o, ".")
+        n = split(addr, parts, "/")
+        split(parts[1], o, ".")
         if (o[1]>255||o[2]>255||o[3]>255||o[4]>255) continue
-        pfx = (n==2) ? p[2]+0 : 32
+        pfx = (n==2) ? parts[2]+0 : 32
         if (pfx<0||pfx>32) continue
 
-        s = lshift(o[1],24) + lshift(o[2],16) + lshift(o[3],8) + o[4]
+        s = o[1]*16777216 + o[2]*65536 + o[3]*256 + o[4]
         sz = P[pfx]
-        s = and(s, compl(sz-1))
+        s = s - (s % sz)
         e = s + sz - 1
 
         if (s <= 16777215) continue
@@ -233,15 +230,14 @@ build_list() {
 
     # Plain POSIX 'sort -n' (no GNU -S flag) -- the ranges files are a few
     # hundred thousand short lines and sort handles them in <0.1s with its
-    # own buffer heuristic. Keeping it POSIX means the only hard dependency
-    # is GNU gawk (for the bit-ops below), so the script runs on any
-    # minimal/slim image that has gawk installed.
-    sort -n "$@" | gawk \
+    # own buffer heuristic.
+    sort -n "$@" | awk \
         -v base="$base" \
         -v outbase="$outbase" \
         -v outdir="$OUTDIR" '
     BEGIN {
-        for (i=0; i<=32; i++) P[i] = lshift(1, i)
+        v = 1
+        for (i=0; i<=32; i++) { P[i]=v; v=v*2 }
         rsc = outbase ".rsc"
         if (base == "blocklist")         ga_suffix = ""
         else if (base == "blocklist_l")  ga_suffix = "_l"
@@ -255,13 +251,13 @@ build_list() {
         count = 0
     }
     function ip(n) {
-        return and(rshift(n,24),255) "." and(rshift(n,16),255) "." and(rshift(n,8),255) "." and(n,255)
+        return int(n/16777216)%256 "." int(n/65536)%256 "." int(n/256)%256 "." n%256
     }
     function emit(s, e,   b, sz, addr) {
         while (s <= e) {
             for (b=0; b<32; b++) {
                 sz = P[b+1]
-                if (and(s,sz-1) || s+sz-1 > e) break
+                if ((s % sz) || s+sz-1 > e) break
             }
             sz = P[b]
             addr = (b==0) ? ip(s) : ip(s) "/" (32-b)

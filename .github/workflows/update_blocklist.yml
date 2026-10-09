@@ -25,17 +25,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install gawk
+      - name: Check awk
         run: |
-          # The script's only hard dependency is GNU gawk (its awk programs
-          # use lshift/and/compl, which mawk/busybox lack). ubuntu-latest
-          # already ships gawk; on a slim runner this installs it. Guard so
-          # we skip the apt lock + network when it's already present.
-          if ! command -v gawk >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y gawk
-          fi
-          gawk --version | head -1
+          awk --version | head -1 || awk -W version 2>&1 | head -1
 
       - name: Generate Blocklists
         run: |
