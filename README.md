@@ -12,29 +12,29 @@ This project provides pre-aggregated blocklists optimized for MikroTik routers. 
 
 | List | File | Entries | Sources |
 |------|------|---------|---------|
-| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~30k | Core threat feeds |
-| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~40k | Core + CINS Army |
-| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~110k | All threat sources including IPsum L1 |
+| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~28k | Core threat feeds |
+| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~36k | Core + CINS Army |
+| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~100k | All threat sources including IPsum L1 |
 
 ## Sources
 
 | Source | Description | Standard | Large | XL |
 |--------|-------------|:--------:|:-----:|:--:|
 | [Spamhaus DROP](https://www.spamhaus.org/drop/) | Hijacked / criminal netblocks ("Don't Route Or Peer") | ✓ | ✓ | ✓ |
-| [Spamhaus EDROP](https://www.spamhaus.org/drop/) | Extended DROP (suballocations) | ✓ | ✓ | ✓ |
-| [SSL Blacklist](https://sslbl.abuse.ch/) | IPs hosting known malicious TLS certs | ✓ | ✓ | ✓ |
-| [Feodo Tracker](https://feodotracker.abuse.ch/) | Banking trojan C&C servers | ✓ | ✓ | ✓ |
 | [ThreatFox](https://threatfox.abuse.ch/) | Active malware campaign IOCs (IP:port export) | ✓ | ✓ | ✓ |
 | [DShield](https://www.dshield.org/) | SANS ISC top attackers (startIP-endIP-netmask format) | ✓ | ✓ | ✓ |
 | [Blocklist.de](https://lists.blocklist.de/) | Fail2ban-reported IPs across participating servers | ✓ | ✓ | ✓ |
 | [FireHOL Level 1](https://iplists.firehol.org/) | Aggregated high-confidence threat intelligence | ✓ | ✓ | ✓ |
 | [IPsum Level 3](https://github.com/stamparm/ipsum) | High-confidence threat IPs (3+ list hits) | ✓ | ✓ | ✓ |
+| [ET Compromised IPs](https://rules.emergingthreats.net/blockrules/) | Proofpoint Emerging Threats list of known compromised hosts | ✓ | ✓ | ✓ |
 | [CINS Army](https://cinsscore.com/) | Sentinel IPS community feed | | ✓ | ✓ |
 | [IPsum Level 1](https://github.com/stamparm/ipsum) | Broader threat IPs (1+ list hits) | | | ✓ |
 
+Retired feeds: Spamhaus EDROP (merged into DROP upstream), SSL Blacklist (deprecated by abuse.ch on 2025-01-03) and Feodo Tracker (unmaintained since March 2026; abuse.ch's C2 data lives on in ThreatFox).
+
 ## Filtered Addresses
 
-The following are automatically excluded from feed input:
+The following are never blocked:
 
 - Private ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
 - CGNAT: `100.64.0.0/10` (RFC 6598)
@@ -42,29 +42,46 @@ The following are automatically excluded from feed input:
 - Link-local: `169.254.0.0/16` (RFC 3927)
 - Multicast + reserved: `224.0.0.0/3` (covers `224.0.0.0/4` multicast and `240.0.0.0/4` IANA-reserved)
 - Zero-network: `0.0.0.0/8`
-- Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25` (Microsoft Teams)
+- Whitelisted: `52.113.194.132` (Microsoft Teams), `35.186.224.25` (Microsoft Teams). The whitelist is the `WHITELIST` setting in `generate.sh` and takes IPs or CIDRs (/16 to /32). If a feed lists a wider range containing a whitelisted address, the range is split so that only the whitelisted part is left out (e.g. a /24 around one whitelisted IP becomes 8 smaller blocks).
 
 ---
 
 ## Blocklist Generation
 
-The generator lives in [`generate.sh`](generate.sh) and runs under GitHub Actions every 3 hours via [`.github/workflows/update_blocklist.yml`](.github/workflows/update_blocklist.yml). Feed URLs, tier assignments, timeouts, retry counts, and the soft-fail threshold are all hoisted to constants at the top of `generate.sh` — edit there.
+The generator lives in [`generate.sh`](generate.sh) and runs under GitHub Actions every 3 hours via [`.github/workflows/update_blocklist.yml`](.github/workflows/update_blocklist.yml). All settings (feeds, tiers, per-feed minimums, list bounds, whitelist, timeouts, retries) are constants at the top of `generate.sh`.
 
-**Dependencies:** `sh`, `sed`, `grep`, `gawk`, `curl`. All present by default on `ubuntu-latest` GitHub runners.
+**Dependencies:** a POSIX `sh`, `curl`, `sort`, and any POSIX `awk`. gawk, mawk and busybox awk are all tested and produce byte-identical output.
 
-**Key behaviors:**
+**Running locally:** `sh generate.sh` writes the lists next to the script. `sh tests/run.sh` runs the offline test suite.
 
-- Per-feed HTTP retries with a polite `User-Agent` (`curl --retry 3 --retry-delay 5 --retry-connrefused --retry-all-errors`).
-- Parallel downloads.
-- Soft-fail: tolerates up to `MAX_FAILED_FEEDS` (2) missing/empty feeds before aborting.
-- **DShield preprocess** — DShield ships `startIP<TAB>endIP<TAB>netmask` per row; the generic regex extractor would treat only the two edge IPs as /32s and miss everything between. A dedicated preprocess step converts to CIDR, with a **format-drift guard** that drops the feed if <50% of rows survive (protects against a silent ~99% coverage loss if DShield changes format).
-- **Reserved-range filter** removes RFC 1918/6598/3927 space, loopback, multicast, and IANA-reserved from feed input at extract time (see [Filtered Addresses](#filtered-addresses) above).
-- Every tier must produce ranges — if any tier is empty, generation aborts loudly so CI surfaces the outage rather than shipping yesterday's committed files.
-- **Delta regression check** in CI fails the run if any tier moves >30% vs the previous commit.
+### How a run works
+
+1. **Download** all feeds in parallel. Each download goes to a temporary file that is only kept if the transfer completes, so a truncated feed can never pass as a good one. Failed feeds are retried by curl (with backoff) and then once more in a second pass a minute later.
+2. **Extract** IPv4 addresses and CIDRs from each feed. Comment lines are skipped, invalid entries ignored, and [reserved address space](#filtered-addresses) dropped. DShield's `startIP endIP netmask` rows are converted to CIDRs first.
+3. **Build** the three lists: overlapping and adjacent ranges are merged, whitelisted addresses are cut out, and the result is written as the smallest set of CIDR blocks in all three file formats.
+4. **Check** the new lists, then replace the old ones. Nothing is overwritten until every check below has passed.
+
+### Failure policy: all or nothing
+
+Routers remove any address that disappears from the list, so shipping a list with a feed missing is worse than shipping no update. A run therefore fails, and leaves every list exactly as it was, if:
+
+- any feed still fails to download after retries;
+- any feed yields fewer ranges than its configured minimum (catches dead feeds, empty files and HTML error pages served instead of data);
+- the DShield file no longer looks like the expected format;
+- any list entry is wider than /10 (correct output is never wider than about /12);
+- any list is outside its expected size, or changed by more than 30% since the last run;
+- any output line has an unexpected shape, or the `.txt` and `.rsc` files disagree.
+
+Errors name the failing feed or list and show up as annotations in the GitHub Actions run, which also gets a per-feed summary table. A failed scheduled run sends GitHub's failure email; routers keep importing the last good lists in the meantime.
+
+### Tests and CI
+
+- `tests/run.sh` runs the real `generate.sh` in offline mode against fixture feeds, with every installed awk (gawk, mawk, busybox). It checks the output byte-for-byte against `tests/expected` and runs ten failure scenarios, each of which must abort without touching the existing lists. See [`tests/README.md`](tests/README.md) for details, how to update the expected output after an intended change, and how to try out a new feed offline.
+- CI lints the scripts with shellcheck and runs the tests before every generation run. It clones only the latest commit, and only commits and pushes on `main`; a manual run on any other branch is a dry run.
 
 ### Credits
 
-The generator script and the GitHub Actions pipeline are based on the work in the [Davie3/mikrotik_blocklist](https://github.com/Davie3/mikrotik_blocklist) fork, which added the Spamhaus EDROP, DShield, and ThreatFox feeds, the DShield CIDR preprocess with format-drift guard, the broader reserved-range filter, and the self-hosted CI pipeline. This repository adopts those changes (with the Tor-exit list omitted, as its upstream feed is no longer maintained) and repoints the generator and router download URLs to this repository.
+The generator script and the GitHub Actions pipeline are based on the work in the [Davie3/mikrotik_blocklist](https://github.com/Davie3/mikrotik_blocklist) fork, which added the Spamhaus EDROP (since merged into DROP upstream and removed here), DShield, and ThreatFox feeds, the DShield CIDR preprocess with format-drift guard, the broader reserved-range filter, and the self-hosted CI pipeline. This repository adopts those changes (with the Tor-exit list omitted, as its upstream feed is no longer maintained) and repoints the generator and router download URLs to this repository.
 
 ---
 
