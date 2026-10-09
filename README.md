@@ -10,11 +10,13 @@ This project provides pre-aggregated blocklists optimized for MikroTik routers. 
 
 ## Available Lists
 
-| List | File | Entries | Sources |
-|------|------|---------|---------|
-| Standard | `blocklist.txt` / `blocklist_ga.rsc` | ~28k | Core threat feeds |
-| Large | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~36k | Core + CINS Army |
-| Extra Large | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~100k | All threat sources including IPsum L1 |
+| List | RouterOS (recommended) | Plain text / legacy | Entries | Sources |
+|------|------|------|---------|---------|
+| Standard | `blocklist.json` | `blocklist.txt` / `blocklist_ga.rsc` | ~28k | Core threat feeds |
+| Large | `blocklist_l.json` | `blocklist_l.txt` / `blocklist_ga_l.rsc` | ~36k | Core + CINS Army |
+| Extra Large | `blocklist_xl.json` | `blocklist_xl.txt` / `blocklist_ga_xl.rsc` | ~100k | All threat sources including IPsum L1 |
+
+The `.json` files are made for the [RouterOS scripts](#routeros-implementation) below (RouterOS 7.13+). `blocklist*.rsc` are plain `add` commands, `blocklist_ga*.rsc` feed the [legacy scripts](#important-notes).
 
 ## Sources
 
@@ -58,7 +60,7 @@ The generator lives in [`generate.sh`](generate.sh) and runs under GitHub Action
 
 1. **Download** all feeds in parallel. Each download goes to a temporary file that is only kept if the transfer completes and is not empty, so a truncated feed can never pass as a good one. curl retries failed transfers itself. Any feed that is still unusable after extraction (failed, empty, below its minimum, or an error page instead of data) is downloaded and checked once more in a second pass a minute later.
 2. **Extract** IPv4 addresses and CIDRs from each feed. Comment lines are skipped, invalid entries ignored, and [reserved address space](#filtered-addresses) dropped. DShield's `startIP endIP netmask` rows are converted to CIDRs first.
-3. **Build** the three lists: overlapping and adjacent ranges are merged, whitelisted addresses are cut out, and the result is written as the smallest set of CIDR blocks in all three file formats.
+3. **Build** the three lists: overlapping and adjacent ranges are merged, whitelisted addresses are cut out, and the result is written as the smallest set of CIDR blocks in all four file formats. The `.json` files are packed into 32 KB blocks, each a self-contained JSON object that RouterOS can read and parse in one step.
 4. **Check** the new lists, then replace the old ones. Nothing is overwritten until every check below has passed.
 
 ### Failure policy: all or nothing
@@ -70,7 +72,7 @@ Routers remove any address that disappears from the list, so shipping a list wit
 - the DShield file no longer looks like the expected format;
 - any list entry is wider than /10 (correct output is never wider than about /12);
 - any list is outside its expected size, or changed by more than 30% since the last run;
-- any output line has an unexpected shape, or the `.txt` and `.rsc` files disagree.
+- any output line has an unexpected shape, the `.txt` and `.rsc` files disagree, or a `.json` block is malformed or its entry count is wrong.
 
 Errors name the failing feed or list and show up as annotations in the GitHub Actions run, which also gets a per-feed summary table. A failed scheduled run sends GitHub's failure email; routers keep importing the last good lists in the meantime.
 
@@ -101,27 +103,175 @@ Example rule (add to your firewall):
 **Policy:** `ftp, read, write, test`  
 **Schedule:** Every 3 hours
 
+Downloads the list as `blocklist_l.json`. Use `blocklist.json` or `blocklist_xl.json` for the other tiers, and use the same file name in Script 2.
+
+```
+:local url "https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_l.json"
+:local file "blocklist_l.json"
+
+:log info "blocklist-DL: started"
+:do {
+    /tool fetch url=$url dst-path=$file
+} on-error={
+    :log error "blocklist-DL: download failed, keeping the previous file"
+    :error "blocklist download failed"
+}
+:log info ("blocklist-DL: finished, " . [/file get $file size] . " bytes")
+```
+
+A failed or truncated download can't do harm: Script 2 checks the file before it changes anything.
+
+### Script 2: Differential Update
+
+**Policy:** `read, write, test`  
+**Schedule:** Every 3 hours, 5 minutes after the download  
+**Requires:** RouterOS 7.13 or newer (`:deserialize`)
+
+The script updates `prod_blocklist` in place. It removes entries that are no longer listed and adds new ones, so the list is active at every moment and RouterOS never holds a second copy of it.
+
+```
+:local file "blocklist_l.json"
+:local listName "prod_blocklist"
+:local block 32768
+
+:log info "blocklist-DIFF: === STARTED ==="
+:local startTime [:timestamp]
+
+# ----------------------------------------------------------------------------
+# STEP 1: Load and verify the new list. Nothing is changed yet.
+# The file is a sequence of 32 KB blocks, each one JSON object:
+#   first octet -> second octet -> rest of the address -> 1
+# deserialize builds each block's nested keyed array in one call.
+# ----------------------------------------------------------------------------
+:if ([:len [/file find name=$file]] = 0) do={
+    :log error "blocklist-DIFF: $file not found, aborting"
+    :error "blocklist file missing"
+}
+:local size [/file get $file size]
+:local bl [:toarray ""]
+:local format 0
+:local expected -1
+:for off from=0 to=($size - 1) step=$block do={
+    :local r [/file read file=$file offset=$off chunk-size=$block as-value]
+    :local data ($r->"data")
+    :if ([:typeof $data] = "nothing") do={ :set data $r }
+    :foreach o1,g in=[:deserialize from=json options=json.no-string-conversion $data] do={
+        :if ($o1 = "#") do={
+            :set format ($g->"format")
+            :set expected ($g->"entries")
+        } else={
+            :if ([:typeof ($bl->$o1)] = "nothing") do={
+                :set ($bl->$o1) $g
+            } else={
+                # first octet continues from the previous block: merge
+                :local b1 ($bl->$o1)
+                :foreach o2,rs in=$g do={ :set ($b1->$o2) $rs }
+                :set ($bl->$o1) $b1
+            }
+        }
+    }
+}
+:local total 0
+:foreach o1,g in=$bl do={ :foreach o2,rs in=$g do={ :set total ($total + [:len $rs]) } }
+:if (($format != 1) || ($total = 0) || ($total != $expected)) do={
+    :log error "blocklist-DIFF: $file invalid (format $format, $total of $expected entries), aborting"
+    :error "blocklist file invalid"
+}
+:log info "blocklist-DIFF: Loaded $total entries"
+
+# ----------------------------------------------------------------------------
+# STEP 2: Walk the current list. Entries still listed are kept and ticked
+# off in $bl; all others are removed. STEP 3: what is left in $bl is new.
+# ----------------------------------------------------------------------------
+:local kept 0
+:local removed 0
+:local added 0
+
+# Disable logging to prevent a flood of add/remove messages
+/system logging disable 0
+
+:do {
+    /ip firewall address-list
+    :foreach id in=[find list=$listName] do={
+        :local s [:tostr [get $id address]]
+        :local i1 [:find $s "."]
+        :local i2 [:find $s "." $i1]
+        :local p1 [:pick $s 0 $i1]
+        :local p2 [:pick $s ($i1 + 1) $i2]
+        :local rest [:pick $s ($i2 + 1) [:len $s]]
+        :if ([:typeof ((($bl->$p1)->$p2)->$rest)] != "nothing") do={
+            # still listed: keep, and tick it off (only small arrays are copied)
+            :local b1 ($bl->$p1)
+            :local b2 ($b1->$p2)
+            :set ($b2->$rest)
+            :set ($b1->$p2) $b2
+            :set ($bl->$p1) $b1
+            :set kept ($kept + 1)
+        } else={
+            remove $id
+            :set removed ($removed + 1)
+        }
+    }
+
+    :foreach o1,g in=$bl do={
+        :foreach o2,rs in=$g do={
+            :foreach rest,v in=$rs do={
+                add list=$listName address=($o1 . "." . $o2 . "." . $rest)
+                :set added ($added + 1)
+            }
+        }
+    }
+} on-error={
+    /system logging enable 0
+    :log error "blocklist-DIFF: failed after removing $removed and adding $added entries"
+    :error "blocklist update failed"
+}
+
+/system logging enable 0
+:set bl
+
+:local finalCount [:len [/ip firewall address-list find list=$listName]]
+:log info "blocklist-DIFF: === COMPLETED ==="
+:log info "blocklist-DIFF: Kept=$kept, Removed=$removed, Added=$added, Total=$finalCount"
+:if ($finalCount != $total) do={
+    :log warning "blocklist-DIFF: list has $finalCount entries, expected $total"
+}
+:log info ("blocklist-DIFF: Duration=" . ([:timestamp] - $startTime))
+```
+
+### Important Notes
+
+1. **First run:** on initial setup, `prod_blocklist` doesn't exist yet. The script simply adds all entries.
+
+2. **Safe failure:** a missing, truncated or corrupted file is detected in step 1, before anything changes. The header's entry count must match what was loaded. The current list then stays as it is.
+
+3. **Performance:** measured on a CCR2004-16G-2S+ with RouterOS 7.24.5 and the large list (~36k entries). A full update that kept 33,368 entries, removed 3,199 and added 3,004 took **23.5 s**. The legacy `.rsc` scripts took 2 min 33 s for a comparable update. Of the new script's time, loading the file takes about 0.3 s, and checking every current entry about 19 s.
+
+4. **Why JSON blocks:** RouterOS arrays are copied whenever they are modified, so building a 36k-entry array one entry at a time is slow (measured: 26 s by appending, 6.5 min as a keyed array). `:deserialize` builds each block's keyed array natively in one call. The blocks are 32 KB because `/file read` reads at most that much per call.
+
+5. **Logging:** the script disables logging rule 0 only while the list is being changed. This avoids thousands of "address-list entry added/removed" messages, and logging is re-enabled even if the update fails.
+
+<details>
+<summary>Legacy scripts (<code>blocklist_ga*.rsc</code>)</summary>
+
+The `blocklist_ga*.rsc` files are still published for existing setups. They work on older RouterOS versions but are much slower: the import builds the array one append at a time and every lookup is a linear `:find`.
+
+**Download:**
+
 ```
 :log info "blocklist-DL: started"
 /tool fetch url="https://raw.githubusercontent.com/multiduplikator/mikrotik_blocklist/main/blocklist_ga_l.rsc" mode=https
 :log info "blocklist-DL: finished"
 ```
 
-### Script 2: Differential Update
-
-**Policy:** `read, write, test`  
-**Schedule:** Every 3 hours, 5 minutes after download
-
-This script performs differential updates — only adding new entries and removing stale ones. This approach maintains continuous protection without any gap in coverage.
+**Differential update:**
 
 ```
 :log info "blocklist-DIFF: === STARTED ==="
 :local startTime [/system clock get time]
 
-# Disable logging to prevent flood
 /system logging disable 0
 
-# Import new IPs into global array
 /import file-name=blocklist_ga_l.rsc
 :global newips
 
@@ -134,7 +284,6 @@ This script performs differential updates — only adding new entries and removi
 
 :log info "blocklist-DIFF: Imported $totalNew entries"
 
-# Process existing entries
 /ip firewall address-list
 
 :local prdkeys [find list=prod_blocklist]
@@ -144,24 +293,16 @@ This script performs differential updates — only adding new entries and removi
 :foreach entryId in=$prdkeys do={
     :local addr [get $entryId address]
     :local keyindex [:find $newips $addr]
-
-    # Check for nil (not found) - fixes index 0 bug
     :if ([:typeof $keyindex] != "nil") do={
-        # EXISTS in new list - keep it, blank out to skip later
         :set ($newips->$keyindex) ""
         :set countKept ($countKept + 1)
     } else={
-        # NOT in new list - remove
         remove $entryId
         :set countRemoved ($countRemoved + 1)
     }
 }
 
-:log info "blocklist-DIFF: Kept $countKept, removed $countRemoved"
-
-# Add NEW entries (non-empty values remaining in $newips)
 :local countAdded 0
-
 :foreach addr in=$newips do={
     :if ($addr != "") do={
         add list=prod_blocklist address=$addr
@@ -169,30 +310,17 @@ This script performs differential updates — only adding new entries and removi
     }
 }
 
-# Cleanup
 :set newips
-
-:local endTime [/system clock get time]
-:local duration ($endTime - $startTime)
-
+:local duration ([/system clock get time] - $startTime)
 /system logging enable 0
 
 :local finalCount [:len [/ip firewall address-list find list=prod_blocklist]]
-
 :log info "blocklist-DIFF: === COMPLETED ==="
 :log info "blocklist-DIFF: Removed=$countRemoved, Added=$countAdded, Total=$finalCount"
 :log info "blocklist-DIFF: Duration=$duration"
 ```
 
-### Important Notes
-
-1. **First Run:** On initial setup, `prod_blocklist` won't exist. The script will simply add all entries.
-
-2. **Index 0 Bug Fix:** Previous versions used `:if ($keyindex > 0)` which incorrectly handled IPs at array index 0. The fix uses `:if ([:typeof $keyindex] != "nil")` to properly detect if an IP was found.
-
-3. **Performance:** Expect 90-150 seconds for ~25k entries on a CCR-1036 or CCR-2004
-
-4. **Logging:** The script disables logging rule 0 during execution to prevent thousands of "address-list entry added/removed" log messages.
+</details>
 
 ---
 
