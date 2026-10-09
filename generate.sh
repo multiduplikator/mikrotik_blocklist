@@ -298,6 +298,22 @@ if [ "$fail" -eq 1 ]; then
     exit 1
 fi
 
+# Check that l-tier and xl-tier range files exist. Without this, a missing
+# glob (e.g. CINS Army down) passes the literal "*.out_l.ranges" to sort,
+# which silently produces no output — leading to empty blocklist_l / xl.
+if ! have_ranges "$CACHE"/*.out_l.ranges; then
+    echo "  ! No large-tier ranges extracted (all l-tier feeds collapsed?)" >&2
+    fail=1
+fi
+if ! have_ranges "$CACHE"/*.out_xl.ranges; then
+    echo "  ! No XL-tier ranges extracted (all xl-tier feeds collapsed?)" >&2
+    fail=1
+fi
+if [ "$fail" -eq 1 ]; then
+    echo "  ! Aborting to avoid committing stale lists." >&2
+    exit 1
+fi
+
 # A bare `wait` under `set -e` does NOT abort on a failed background job
 # (it returns 0), so a build_list failure would silently ship partial
 # files. Capture the exit status explicitly and fail loudly.
