@@ -79,6 +79,7 @@ Errors name the failing feed or list and show up as annotations in the GitHub Ac
 ### Tests and CI
 
 - `tests/run.sh` runs the real `generate.sh` in offline mode against fixture feeds, with every installed awk (gawk, mawk, busybox). It checks the output byte-for-byte against `tests/expected` and runs a retry-pass recovery check and thirteen failure scenarios, each of which must abort without touching the existing lists. See [`tests/README.md`](tests/README.md) for details, how to update the expected output after an intended change, and how to try out a new feed offline.
+- The workflow is triggered every hour (at minute 17, away from GitHub's busiest minute) but regenerates only when the lists are about 3 hours old, so a delayed or dropped scheduled run is made up within the hour. Manual runs always regenerate.
 - CI lints the scripts with shellcheck and runs the tests before every generation run. It clones only the latest commit, and only commits and pushes on `main`; a manual run on any other branch is a dry run.
 
 ### Credits

@@ -2,11 +2,13 @@ name: update_blocklist
 
 on:
   schedule:
-    # Running every 3h
-    - cron: "0 */3 * * *"
+    # Hourly at :17. GitHub's scheduler is best-effort: it delays and drops
+    # runs, worst at the start of each hour. Trying every hour gives each
+    # 3-hour slot three chances; the "due" job keeps the cadence at ~3h.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
-# Least-privilege default; the build job opts into contents:write below.
+# Least-privilege default; jobs opt into what they need below.
 permissions: {}
 
 concurrency:
@@ -14,7 +16,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Scheduled runs regenerate only if the lists are older than MIN_AGE_MIN
+  # (measured from the newest commit that changed them). Manual runs always
+  # regenerate. If the age can't be determined, regenerate.
+  due:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Check if a regeneration is due
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          MIN_AGE_MIN: 170
+        run: |
+          set -uo pipefail
+          run=true
+          if [ "$EVENT" = schedule ]; then
+            last=$(gh api "repos/$GITHUB_REPOSITORY/commits?sha=main&path=blocklist_l.txt&per_page=1" \
+              --jq '.[0].commit.committer.date') || last=""
+            if [ -n "$last" ] && last_s=$(date -u -d "$last" +%s); then
+              age=$(( ($(date -u +%s) - last_s) / 60 ))
+              echo "Lists last changed $last ($age min ago, minimum $MIN_AGE_MIN)."
+              [ "$age" -ge "$MIN_AGE_MIN" ] || run=false
+            else
+              echo "Could not determine the age of the lists; regenerating."
+            fi
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: due
+    if: needs.due.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Worst case is ~14 min: two download passes, each up to ~6 min with
     # curl's retries, plus the pause between them.
