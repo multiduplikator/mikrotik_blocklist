@@ -20,7 +20,10 @@ jobs:
   # (measured from the newest commit that changed them). Manual runs always
   # regenerate. If the age can't be determined, regenerate.
   due:
-    runs-on: ubuntu-latest
+    # 1-vCPU container runner: enough for these short jobs. It has
+    # shellcheck, curl, git, gh and mawk; tests/run.sh skips the awks it
+    # lacks (gawk, busybox), so those are only tested locally.
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read
@@ -52,7 +55,7 @@ jobs:
   build:
     needs: due
     if: needs.due.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # Worst case is ~14 min: two download passes, each up to ~6 min with
     # curl's retries, plus the pause between them.
     timeout-minutes: 20
