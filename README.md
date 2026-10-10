@@ -1,5 +1,7 @@
 # MikroTik Blocklist
 
+[![Lists updated](https://img.shields.io/github/last-commit/multiduplikator/mikrotik_blocklist/main?path=blocklist_l.txt&label=lists%20updated)](https://github.com/multiduplikator/mikrotik_blocklist/commits/main/blocklist_l.txt)
+
 An aggregated IP blocklist for MikroTik RouterOS firewalls, compiled from multiple threat intelligence sources. Tried and tested on ROS 7.24.5 - latest at the time of writing.
 
 ## Overview
@@ -79,7 +81,7 @@ Errors name the failing feed or list and show up as annotations in the GitHub Ac
 ### Tests and CI
 
 - `tests/run.sh` runs the real `generate.sh` in offline mode against fixture feeds, with every installed awk (gawk, mawk, busybox). It checks the output byte-for-byte against `tests/expected` and runs a retry-pass recovery check and thirteen failure scenarios, each of which must abort without touching the existing lists. See [`tests/README.md`](tests/README.md) for details, how to update the expected output after an intended change, and how to try out a new feed offline.
-- The workflow is triggered every hour (at minute 17, away from GitHub's busiest minute) but regenerates only when the lists are about 3 hours old, so a delayed or dropped scheduled run is made up within the hour. Manual runs always regenerate.
+- The workflow is triggered three times an hour (at minutes 7, 27 and 47, away from GitHub's busiest minute) but regenerates only when the lists are about 2.5 hours old. GitHub's scheduler delays and drops scheduled runs, so frequent tries mean a dropped one costs 20 minutes. Manual runs always regenerate. The badge at the top shows when the lists last changed.
 - CI lints the scripts with shellcheck and runs the tests before every generation run. It runs on GitHub's 1-vCPU `ubuntu-slim` runner, which only has mawk, so run `sh tests/run.sh` locally to cover gawk and busybox awk as well. It clones only the latest commit, and only commits and pushes on `main`; a manual run on any other branch is a dry run.
 
 ### Credits

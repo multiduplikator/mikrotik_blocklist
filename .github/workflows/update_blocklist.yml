@@ -2,10 +2,11 @@ name: update_blocklist
 
 on:
   schedule:
-    # Hourly at :17. GitHub's scheduler is best-effort: it delays and drops
-    # runs, worst at the start of each hour. Trying every hour gives each
-    # 3-hour slot three chances; the "due" job keeps the cadence at ~3h.
-    - cron: "17 * * * *"
+    # Three times an hour, away from the full hour. GitHub's scheduler is
+    # best-effort: it delays and drops runs (worst at the start of each
+    # hour). Frequent tries mean a dropped one costs 20 minutes; the "due"
+    # job keeps the actual regeneration cadence at ~3 hours.
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:
 
 # Least-privilege default; jobs opt into what they need below.
@@ -35,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          MIN_AGE_MIN: 170
+          MIN_AGE_MIN: 150
         run: |
           set -uo pipefail
           run=true
@@ -56,9 +57,9 @@ jobs:
     needs: due
     if: needs.due.outputs.run == 'true'
     runs-on: ubuntu-slim
-    # Worst case is ~14 min: two download passes, each up to ~6 min with
-    # curl's retries, plus the pause between them.
-    timeout-minutes: 20
+    # ubuntu-slim kills jobs after 15 minutes regardless of this setting.
+    # Normal runs take ~15 s; generate.sh's worst case is ~7.5 min.
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -96,9 +97,10 @@ jobs:
           fi
           git commit -m "Regenerate blocklists - $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
 
+      # If main moved during the run, the push is rejected and the job
+      # fails; the next scheduled try regenerates on top of the new main.
       - name: Push Changes
         if: github.ref == 'refs/heads/main'
-        uses: ad-m/github-push-action@881a6320fdb16eb5318c5054f31c218aec2b324c # v1.3.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main

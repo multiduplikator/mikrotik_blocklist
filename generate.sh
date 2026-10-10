@@ -25,11 +25,14 @@ export LC_ALL=C
 
 UA="multiduplikator/mikrotik_blocklist regenerator (github.com/multiduplikator/mikrotik_blocklist)"
 
-CURL_CONNECT_TIMEOUT=30
-CURL_MAX_TIME=120           # per attempt
+# Download budget. Worst case per pass: attempts start at 0, 65 and 130 s
+# and each may take 60 s, so ~3.2 min; with the pause and a second pass
+# ~7.5 min in total. CI runs on a runner that kills jobs after 15 minutes.
+CURL_CONNECT_TIMEOUT=20
+CURL_MAX_TIME=60            # per attempt; feeds normally take seconds
 CURL_RETRIES=3
 CURL_RETRY_DELAY=5          # fixed pause between attempts
-CURL_RETRY_MAX_TIME=300     # no new attempt starts after this many seconds
+CURL_RETRY_MAX_TIME=150     # no new attempt starts after this many seconds
 RETRY_PASS_DELAY=60         # pause before a second pass over failed feeds
 
 # Output sanity checks. A run that violates any of them aborts before the
